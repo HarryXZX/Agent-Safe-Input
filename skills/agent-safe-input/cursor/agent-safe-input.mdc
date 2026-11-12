@@ -1,0 +1,58 @@
+---
+description: Route privileged commands through a human-approved script queue instead of asking for a password. Apply when a task needs sudo, root, apt-get, systemctl, mount, chown outside home, or edits under /etc.
+globs:
+alwaysApply: false
+---
+
+# Agent-Safe-Input
+
+You cannot run `sudo`, and you must not try. You have a way to **ask** instead.
+
+## Rule
+
+Never execute `sudo`, `pkexec`, `su`, `doas`, or edit `/etc/sudoers`. Never ask for the
+password. Queue the work and let the human run it.
+
+## Loop
+
+```bash
+# 1. queue (writes a file on the remote host; never executes)
+agent-safe-input queue install-build-deps <<'EOS'
+# Purpose: install the C/C++ toolchain for the firmware build
+apt-get update
+apt-get install -y --no-install-recommends build-essential cmake ninja-build
+EOS
+```
+
+2. Tell the human, in one line: run `agent-safe-input run <id>`.
+3. Read the outcome — never guess from a log:
+
+```bash
+agent-safe-input result <id>
+```
+
+| `status` | Meaning | What you do |
+|---|---|---|
+| `success` | ran, exit 0 | read `<id>.log`, continue |
+| `failed` | non-zero or SSH error | read `<id>.log`, fix, re-queue under a NEW name |
+| `cancelled` | **the human said no** | nothing ran; do not retry, ask once what to change |
+
+Exit codes: `0` success, `2` cancelled, other = failure.
+
+## Hard rules
+
+1. Never ask for, accept, or repeat the password.
+2. Never write or suggest `NOPASSWD` — a whitelisted `apt-get` is still root.
+3. No secrets in a queued script (it is stored on disk and printed to the terminal).
+4. Never call `agent-safe-input run` yourself — it requires a TTY and is human-only.
+5. Batch aggressively: one script per *decision*, not per command. Every script starts with a
+   `# Purpose:` comment, which is the title the human reads before approving.
+
+## Pitfalls
+
+- Non-interactive SSH skips `~/.bashrc` — use `bash -lc '...'` inside the script.
+- Run long jobs inside `tmux` in the script, so an SSH hiccup does not kill them.
+- The queue is plain files and survives reboots; a cancelled script stays until purged.
+- Configure the target once: `AGENT_SAFE_INPUT_SSH_TARGET=user@host` or an `~/.ssh/config` alias.
+
+Full contract: <https://github.com/HarryXZX/Agent-Safe-Input/blob/main/AGENTS.md>

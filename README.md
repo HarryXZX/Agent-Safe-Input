@@ -180,6 +180,27 @@ message=用户取消了操作，脚本未执行，仍在队列里
 > 然后请人执行 `agent-safe-input run <id>`。永远不要索要口令、不要碰 `sudoers`；
 > `status=cancelled` 表示「人拒绝了」，不是「失败了要重试」。
 
+## 作为 Agent Skill 安装
+
+仓库自带一份符合 [Agent Skills 规范](https://agentskills.io/specification) 的 skill：
+[`skills/agent-safe-input/SKILL.md`](skills/agent-safe-input/SKILL.md)。装进 agent 的 skills 目录后，
+它会自己判断「这条命令该不该排队」，你不必每次提醒它别碰 `sudo`。
+
+```bash
+./install-skill.sh            # 自动探测本机已装的 agent，逐个安装
+./install-skill.sh --list     # 看支持哪些 target、探测到什么
+```
+
+| target | 落点 | 说明 |
+|---|---|---|
+| `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code，加 `-p` 装到项目级 |
+| `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy，加 `-p` 装到项目级 |
+| `cursor` | `<项目>/.cursor/rules/agent-safe-input.mdc` | Cursor 规则格式，仅项目级 |
+| `agents` | 无需安装 | Codex / Gemini CLI / Copilot 直接读仓库根 `AGENTS.md` |
+
+重复运行是幂等的（内容相同提示「已是最新」）；`-f` 覆盖旧版；`--uninstall <target>` 卸载，
+只删自己放的 `SKILL.md`，目录里的其它文件不动。
+
 ## Windows 启动器
 
 `windows/agent-safe-input-window.bat` —— 双击弹出一个终端跑 `agent-safe-input run`，跑完不自动关窗。
@@ -378,6 +399,29 @@ touching a privileged command. The short version:
 > `agent-safe-input queue`, then ask the human to run `agent-safe-input run <id>`. Never ask for the
 > password, never write to `sudoers`, and treat `status=cancelled` as "the human said no" —
 > not as a failure to retry.
+
+## Install as an Agent Skill
+
+The repo ships a skill that follows the [Agent Skills specification](https://agentskills.io/specification):
+[`skills/agent-safe-input/SKILL.md`](skills/agent-safe-input/SKILL.md). Once it is in an agent's
+skills directory, the agent recognises on its own when a command has to be queued — you no
+longer have to remind it that it cannot run `sudo`.
+
+```bash
+./install-skill.sh            # detect installed agents and install for each
+./install-skill.sh --list     # show supported targets and what was detected
+```
+
+| target | Destination | Notes |
+|---|---|---|
+| `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code; add `-p` for project scope |
+| `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy; add `-p` for project scope |
+| `cursor` | `<project>/.cursor/rules/agent-safe-input.mdc` | Cursor rule format, project scope only |
+| `agents` | nothing to install | Codex / Gemini CLI / Copilot read the repo's `AGENTS.md` |
+
+Re-running is idempotent (identical content reports "already up to date"); `-f` overwrites an older
+copy; `--uninstall <target>` removes only the `SKILL.md` this tool placed, leaving anything else in
+the directory untouched.
 
 ## Windows launcher
 

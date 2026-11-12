@@ -6,6 +6,15 @@ Instructions for an AI agent that has SSH access to a host through Agent-Safe-In
 
 ---
 
+## 0. Skill package
+
+The same contract also ships as an Agent Skill: [`skills/agent-safe-input/SKILL.md`](skills/agent-safe-input/SKILL.md).
+Clients that support the [Agent Skills](https://agentskills.io/specification) format (Claude Code,
+WorkBuddy, …) load it automatically when a task turns privileged — install with `./install-skill.sh`.
+
+This file stays the tool-agnostic contract: Codex, Gemini CLI and Copilot read `AGENTS.md` directly.
+If both are present they agree; the skill adds trigger keywords and a workflow checklist, not new rules.
+
 ## 1. What you have
 
 | Capability | Status |
