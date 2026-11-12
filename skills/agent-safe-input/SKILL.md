@@ -72,6 +72,9 @@ status=cancelled  # the human said no  → nothing ran, the script is still queu
 
 Exit codes mirror the file: `0` success, `2` cancelled, anything else failure.
 
+`status=` is always one of those three English words. `message=` may be written in the human's
+interface language (Chinese, Japanese, German…) — read `status=`, never the prose.
+
 ## Reading `cancelled` correctly
 
 `cancelled` means **the human declined**. It does not mean the command broke.

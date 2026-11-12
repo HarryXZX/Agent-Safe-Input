@@ -86,6 +86,36 @@ REMOTE_DIR=~/.agent-safe-input/queue
 
 `SSH_TARGET` 可以是 `user@host`，也可以是 `~/.ssh/config` 里的 `Host` 别名。
 
+## 界面语言
+
+界面自动跟随系统语言，认不出就用英文。查找顺序：
+
+```
+AGENT_SAFE_INPUT_LANG  >  LC_ALL  >  LC_MESSAGES  >  LANGUAGE  >  LANG  >  en
+```
+
+`C` / `POSIX` 不算「用户选了一种语言」，会被跳过继续往下找。支持 10 种：
+`en` `zh_CN` `zh_TW` `ja` `ko` `de` `fr` `es` `pt_BR` `ru`。
+
+```bash
+AGENT_SAFE_INPUT_LANG=ja agent-safe-input help   # 临时切一种
+agent-safe-input lang                            # 看当前用的哪种、语言包在哪
+```
+
+语言包是 `i18n/<tag>.sh`，纯 bash 变量，没有编译步骤，也没有 gettext / .mo 依赖。
+**单文件安装（只拷 `bin/agent-safe-input`）只有英文**；要界面翻译就把 `i18n/` 一起放：
+
+```bash
+mkdir -p ~/.local/share/agent-safe-input
+cp -r i18n ~/.local/share/agent-safe-input/
+```
+
+加一种语言只需新建 `i18n/<tag>.sh`——缺的 key 会自动回落英文，不必写全。写完跑
+`python3 scripts/check-i18n.py` 自检：它会核对 key 覆盖情况和每条消息的 `%s` 占位符数量。
+
+注意一处刻意的不对称：`result` 文件里的 `status=` 永远是 `success` / `failed` /
+`cancelled` 这三个英文词，机器判断只认它；而 `message=` 是给人读的，会跟随界面语言。
+
 ## 快速上手
 
 ```bash
@@ -118,6 +148,7 @@ agent-safe-input run  20261112-134107-install-build-deps
 | `agent-safe-input result <id>` | Agent | 读结果文件（`status=…`） |
 | `agent-safe-input purge` | 人 | 清空队列和历史输出 |
 | `agent-safe-input status` | 都行 | 显示配置与待执行条数 |
+| `agent-safe-input lang` | 都行 | 显示当前界面语言、语言包来源、可用语言 |
 
 交互确认只认四个词、**不分大小写**：`y` / `yes` 执行，`n` / `no` 取消。其它任何输入
 （包括空回车、手滑打错）都**忽略并重问**，所以打错字不会把流程弄崩。不带 id 运行且队列
@@ -300,6 +331,40 @@ Environment variables win over the file: `AGENT_SAFE_INPUT_SSH_TARGET`, `AGENT_S
 
 `SSH_TARGET` can be any `user@host` **or** a `Host` alias from your `~/.ssh/config`.
 
+## Interface language
+
+The interface follows the system language and falls back to English. Lookup order:
+
+```
+AGENT_SAFE_INPUT_LANG  >  LC_ALL  >  LC_MESSAGES  >  LANGUAGE  >  LANG  >  en
+```
+
+`C` / `POSIX` does not count as "the user picked a language", so it is skipped and the next
+variable is tried. Ten languages ship today:
+`en` `zh_CN` `zh_TW` `ja` `ko` `de` `fr` `es` `pt_BR` `ru`.
+
+```bash
+AGENT_SAFE_INPUT_LANG=ja agent-safe-input help   # switch for one command
+agent-safe-input lang                            # which language, and where it came from
+```
+
+Language packs are plain bash files in `i18n/<tag>.sh` — no compilation step, no gettext,
+no `.mo` files. **A single-file install (just `bin/agent-safe-input`) speaks English only**;
+copy the packs alongside it to get translations:
+
+```bash
+mkdir -p ~/.local/share/agent-safe-input
+cp -r i18n ~/.local/share/agent-safe-input/
+```
+
+Adding a language means adding one file: missing keys fall back to English, so a pack does not
+have to be complete. Then run `python3 scripts/check-i18n.py` — it checks key coverage and the
+number of `%s` placeholders in every message.
+
+One deliberate asymmetry: `status=` in the result file is always one of the three English
+words `success` / `failed` / `cancelled`, and that is all a machine should match on. `message=`
+is for humans and follows the interface language.
+
 ## Quickstart
 
 ```bash
@@ -332,6 +397,7 @@ agent-safe-input run  20261112-134107-install-build-deps
 | `agent-safe-input result <id>` | agent | Print the result file (`status=…`) |
 | `agent-safe-input purge` | human | Empty the queue and remove outputs |
 | `agent-safe-input status` | either | Show config and how many scripts are pending |
+| `agent-safe-input lang` | either | Show the active language, where the pack came from, and what is available |
 
 Interaction accepts exactly four words, **case-insensitive**: `y` / `yes` = run,
 `n` / `no` = cancel. Anything else (empty line included) is ignored and re-asked, so a

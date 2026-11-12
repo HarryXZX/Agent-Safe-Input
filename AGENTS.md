@@ -66,6 +66,10 @@ status=failed     # non-zero/SSH error → read <id>.log, fix, re-queue under a 
 status=cancelled  # the human said no  → nothing ran, the script is still queued
 ```
 
+**Match on `status=` only.** Its value is always one of those three English words, whatever the
+interface language. `message=` is written for the human and may be Chinese, Japanese, German… —
+never parse it, never translate it back into a decision.
+
 Rules for `cancelled`:
 
 - It means **the human declined**, not that something broke.

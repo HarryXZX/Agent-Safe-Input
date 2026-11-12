@@ -11,7 +11,219 @@
 # =============================================================================
 set -uo pipefail
 
-VERSION="0.1.0"
+VERSION="0.3.0"
+
+# ── 国际化（i18n）─────────────────────────────────────────────────────────────
+# 选择顺序：AGENT_SAFE_INPUT_LANG > LC_ALL > LC_MESSAGES > LANG > Windows 用户区域 > en
+#   C / POSIX 不算「选了一种语言」，跳过继续往下找。
+#   任何识别不出的情况一律回落 en —— 这就是「例外用 en」。
+# 语言包放在 i18n/<tag>.sh，与脚本同级或 ../i18n；找不到就只用内置英文，
+#   所以「把单文件拷进 ~/.local/bin」仍然可用，只是没有翻译。
+
+SELF_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1 && readlink -f "$SELF_PATH" >/dev/null 2>&1; then
+    SELF_PATH="$(readlink -f "$SELF_PATH")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd || printf '.')"
+
+# ── 内置英文（基准）───────────────────────────────────────────────────────────
+lang_en() {
+    M_NO_TARGET='No SSH target configured. Set AGENT_SAFE_INPUT_SSH_TARGET=user@host, or add a SSH_TARGET= line to %s (see examples/config).'
+    M_CONFIRM='Continue? '
+    M_EMPTY_INPUT='^ Nothing entered. Type y or n.'
+    M_INVALID_INPUT='^ Only y / yes / n / no are accepted. "%s" was ignored - try again.'
+    M_NEED_TTY='This needs an interactive terminal (stdin is not a TTY) - otherwise there is nowhere to type the sudo password.'
+    M_NO_DEV_TTY='Cannot open /dev/tty, so the password prompt has nowhere to go.'
+    M_USAGE_QUEUE='Usage: agent-safe-input queue <name> [--] "command"   or   agent-safe-input queue <name> <<EOS ... EOS'
+    M_MKTEMP='mktemp failed'
+    M_EMPTY_BODY='The script body is empty - pass commands after the name, or pipe them in on stdin.'
+    M_HDR_PURPOSE='# Purpose: %s'
+    M_HDR_QUEUED='# Queued by agent-safe-input %s at %s'
+    M_HDR_HOW='# To run: agent-safe-input run %s - a human reviews this script and types their own sudo password'
+    M_QUEUE_FAIL='Queueing failed: check the SSH connection and that %s is writable.'
+    M_QUEUED='Queued %s (not executed). Ask the human to run: agent-safe-input run %s'
+    M_EMPTY_QUEUE='The queue is empty - nothing is waiting for root.'
+    M_PENDING_HDR='Root scripts waiting for approval:'
+    M_NO_TITLE='(no description)'
+    M_BYTES='%s bytes'
+    M_LIST_HINT='Show one: agent-safe-input show <id>\nRun one:  agent-safe-input run <id>'
+    M_USAGE_SHOW='Usage: agent-safe-input show <id>'
+    M_NOT_IN_QUEUE='No such script in the queue: %s'
+    M_SHOW_END='end'
+    M_USAGE_RESULT='Usage: agent-safe-input result <id>'
+    M_PURGE_EMPTY='The queue was already empty - nothing to purge.'
+    M_PURGE_CONFIRM='[agent-safe-input] This deletes %s queued script(s) and their output. y to confirm, n to cancel: '
+    M_PURGE_CANCEL_MSG='The human cancelled; the queue was not purged'
+    M_PURGE_CANCEL='x Cancelled by the human - the queue was not purged.'
+    M_PURGE_DONE='Queue purged.'
+    M_RUN_EMPTY='The queue is empty - nothing to run.'
+    M_PICK_PROMPT='[agent-safe-input] Enter a number (1-%s) to run, or n to cancel: '
+    M_PICK_CANCEL_MSG='The human cancelled without selecting a task'
+    M_PICK_CANCEL='x Cancelled by the human - no task selected.'
+    M_PICK_INVALID='^ Enter a number between 1 and %s, or n to cancel (input ignored).'
+    M_PICK_RANGE='^ Out of range (only 1-%s). Try again.'
+    M_PICK_MISS='^ Could not read entry %s. Try again.'
+    M_RUN_MISSING='No such script in the queue: %s (see agent-safe-input list)'
+    M_RUN_HDR='-------- the script below will run as root --------'
+    M_RUN_FTR='--------------------------------------------------'
+    M_RUN_NOTE='Type y to run it; type n if you would rather not.'
+    M_RUN_CONFIRM='[agent-safe-input] y (yes) to run, n (no) to cancel: '
+    M_RUN_CANCEL_MSG='The human cancelled; the script did not run and stays queued'
+    M_RUN_CANCEL='x Cancelled by the human - %s did not run and is still queued.'
+    M_SUDO_1='> Next you will see  [sudo] password for <you>:  - type it, nothing is echoed.'
+    M_SUDO_2='> A wrong password can be retried (sudo allows 3 attempts).'
+    M_OK_MSG='Ran successfully; output in %s'
+    M_OK='OK Success. Output saved to %s'
+    M_SSH_MSG='SSH connection failed (exit 255); nothing ran'
+    M_SSH_FAIL='x SSH connection failed (exit 255): the host may be down or unreachable.'
+    M_FAIL_MSG='Failed (exit %s); output in %s'
+    M_FAIL='x Failed (exit %s). Usual causes: wrong password, or a command in the script failed.'
+    M_LOG_AT='  Output: %s'
+    M_ARCHIVED='Script archived to %s (mv it back to re-run)'
+    M_STILL_QUEUED='The script is still queued - fix it and run again.'
+    M_ST_TARGET='SSH target'
+    M_ST_ARGS='SSH args'
+    M_ST_REMOTE='Remote queue'
+    M_ST_CONFIG='Config file'
+    M_UNSET='(not set)'
+    M_NONE='(none)'
+    M_MISSING=' (missing)'
+    M_ST_PENDING='Pending'
+    M_UNKNOWN_CMD='Unknown subcommand: %s (see agent-safe-input help)'
+    M_LANG_LINE='Language'
+    M_LANG_SRC='Loaded from'
+    M_LANG_BUILTIN='built-in English'
+    M_LANG_HOWTO='Override with AGENT_SAFE_INPUT_LANG=<tag>, e.g. AGENT_SAFE_INPUT_LANG=ja'
+    M_LANG_AVAIL='Available'
+}
+
+help_text() {
+    cat <<'HELPEOF'
+agent-safe-input - let an AI agent run sudo, safely
+
+  The agent prepares the root commands; you approve them and type the password.
+  The password never enters the chat, a script, or a log.
+
+Usage:
+  agent-safe-input queue <name> [--] 'cmd'    queue work that needs root (not executed)
+  agent-safe-input queue <name> <<'EOS'       ...or read the whole script from stdin
+  ...commands...
+  EOS
+
+  agent-safe-input list                       list the queue
+  agent-safe-input show <id>                  print one script in full
+  agent-safe-input run [id]                   [HUMAN ONLY] review, confirm, run via sudo
+  agent-safe-input result <id>                read the outcome (success/failed/cancelled)
+  agent-safe-input purge                      empty the queue and delete output
+  agent-safe-input status                     show config and queue size
+  agent-safe-input lang                       show the active language
+  agent-safe-input help | version
+
+Config (environment wins):
+  AGENT_SAFE_INPUT_SSH_TARGET   ssh target, e.g. user@host or a ~/.ssh/config alias
+  AGENT_SAFE_INPUT_SSH_ARGS     extra ssh args, e.g. "-F ./ssh_config -p 2222"
+  AGENT_SAFE_INPUT_REMOTE_DIR   remote queue dir, default ~/.agent-safe-input/queue
+  AGENT_SAFE_INPUT_LANG         UI language tag, e.g. en, zh_CN, ja (default: follow the system)
+
+Example:
+  export AGENT_SAFE_INPUT_SSH_TARGET=user@192.168.1.10
+  agent-safe-input queue install-deps <<'EOS'
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential
+  EOS
+  agent-safe-input run            # you review the script, type y, then your password
+
+Exit codes:
+  0 success   2 cancelled by the human   1 argument/connection/execution failure
+HELPEOF
+}
+
+# 把各种写法归一：zh-CN → zh_CN，zh_HK → zh_TW，ja_JP → ja，de_AT → de …
+norm_lang() {
+    local t="${1:-}"
+    [ -n "$t" ] || { printf ''; return; }
+    t="${t//-/_}"
+    case "$t" in
+        zh_TW|zh_HK|zh_MO) printf 'zh_TW' ;;
+        zh_SG)             printf 'zh_CN' ;;
+        zh*)               printf 'zh_CN' ;;
+        pt*)               printf 'pt_BR' ;;
+        en*)               printf 'en' ;;
+        ja*|ko*)           printf '%s' "${t%%_*}" ;;
+        de*|fr*|es*|ru*)   printf '%s' "${t%%_*}" ;;
+        *)                 printf '' ;;
+    esac
+}
+
+# 探测 → 归一化的语言标签；探测不到输出空串
+# 注意：这里不查注册表。Git Bash / MSYS 的 LANG 本来就跟随 Windows 区域设置，
+# 而 reg.exe 在很多受管环境里被列入程序黑名单，调它只会报错。
+detect_lang() {
+    local raw tag
+    if [ -n "${AGENT_SAFE_INPUT_LANG:-}" ]; then
+        tag="$(norm_lang "${AGENT_SAFE_INPUT_LANG}")"
+        [ -n "$tag" ] || tag="en"
+        printf '%s' "$tag"; return 0
+    fi
+    for raw in "${LC_ALL:-}" "${LC_MESSAGES:-}" "${LANGUAGE:-}" "${LANG:-}"; do
+        [ -n "$raw" ] || continue
+        raw="${raw%%.*}"; raw="${raw%%@*}"
+        case "$raw" in C|POSIX|c|posix|"") continue ;; esac
+        tag="$(norm_lang "$raw")"
+        if [ -n "$tag" ]; then printf '%s' "$tag"; return 0; fi
+    done
+    printf ''
+}
+
+i18n_search_paths() {
+    printf '%s\n' \
+        "${AGENT_SAFE_INPUT_I18N_DIR:-}" \
+        "$SCRIPT_DIR/i18n" \
+        "$SCRIPT_DIR/../i18n" \
+        "$SCRIPT_DIR/../share/agent-safe-input/i18n" \
+        "$HOME/.local/share/agent-safe-input/i18n" \
+        "/usr/local/share/agent-safe-input/i18n" \
+        "/usr/share/agent-safe-input/i18n"
+}
+
+load_i18n() {
+    lang_en
+    LANG_TAG="$(detect_lang)"
+    LANG_TAG="${LANG_TAG:-en}"
+    I18N_FILE=""
+    if [ "$LANG_TAG" != "en" ]; then
+        local dir f
+        while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
+            f="$dir/$LANG_TAG.sh"
+            if [ -f "$f" ]; then
+                # shellcheck disable=SC1090
+                . "$f" && I18N_FILE="$f"
+                break
+            fi
+        done <<< "$(i18n_search_paths)"
+        # 没找到语言包：回落英文
+        if [ -z "$I18N_FILE" ]; then
+            LANG_TAG="en"
+        fi
+    fi
+}
+
+# t KEY [args...] → 取当前语言字符串并做 printf 格式化；缺 key 时原样返回 key
+t() {
+    local key="$1"; shift
+    local fmt="${!key-}"
+    [ -n "$fmt" ] || { printf '%s' "$key"; return 0; }
+    if [ $# -eq 0 ]; then
+        # %b：让语言包里的 \n 生效，同时不把 % 当格式符
+        printf '%b' "$fmt"
+    else
+        # shellcheck disable=SC2059
+        printf "$fmt" "$@"
+    fi
+}
+
+load_i18n
 
 # ── 输出 ─────────────────────────────────────────────────────────────────────
 die()  { printf 'agent-safe-input: %s\n' "$*" >&2; exit 1; }
@@ -48,18 +260,20 @@ if [ -n "$SSH_ARGS" ]; then
 fi
 
 # 非交互查询用 -n：否则 ssh 会把 stdin（用户待输入的 y/n）整段吞掉
-ssh_q() { ssh -n ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
+# LogLevel=ERROR：新版 OpenSSH 会对 post-quantum KEX 每次打三行警告，混进 list/show 的输出里很难看；
+# 用户自己传的 -o LogLevel=... 排在后面仍可覆盖。
+ssh_q() { ssh -n -o LogLevel=ERROR ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
 # 交互执行：必须保留 TTY，sudo 才能提示口令
-ssh_t() { ssh -t ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
+ssh_t() { ssh -t -o LogLevel=ERROR ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
 
 require_target() {
-    [ -n "$SSH_TARGET" ] || die "没有配置 SSH 目标。设环境变量 AGENT_SAFE_INPUT_SSH_TARGET=user@host，或写进 $CONFIG_FILE 的 SSH_TARGET= 一行（见 examples/config）"
+    [ -n "$SSH_TARGET" ] || die "$(t M_NO_TARGET "$CONFIG_FILE")"
 }
 
 # ── 交互确认：只认 y/yes/n/no，其它输入忽略重问 ──────────────────────────────
 # 返回 0=继续，1=取消（含输入结束/终端关闭）
 confirm() {
-    local prompt="${1:-继续？}" a
+    local prompt="${1:-$(t M_CONFIRM)}" a low
     while :; do
         printf '%s' "$prompt"
         if ! IFS= read -r a; then
@@ -67,11 +281,13 @@ confirm() {
             return 1
         fi
         a="$(printf '%s' "${a%%$'\r'}" | tr -d '[:space:]')"
-        case "${a,,}" in
+        # tr 而不是 ${a,,}：macOS 自带 bash 3.2 不支持大小写转换展开
+        low="$(printf '%s' "$a" | tr 'A-Z' 'a-z')"
+        case "$low" in
             y|yes) return 0 ;;
             n|no)  return 1 ;;
-            "")    printf '  ↑ 没有输入内容。请输入 y 或 n（大小写都行）。\n' ;;
-            *)     printf '  ↑ 只接受 y / yes / n / no，刚才的“%s”已忽略，请重新输入。\n' "$a" ;;
+            "")    printf '  %s\n' "$(t M_EMPTY_INPUT)" ;;
+            *)     printf '%s\n' "$(t M_INVALID_INPUT "$a")" ;;
         esac
     done
 }
@@ -79,8 +295,8 @@ confirm() {
 need_tty() {
     # AGENT_SAFE_INPUT_TEST_TTY=1 仅供自动化回归测试（验证取消/无效输入分支），正常使用不要设
     [ "${AGENT_SAFE_INPUT_TEST_TTY:-0}" = "1" ] && return 0
-    [ -t 0 ] || die "需要在交互式终端里运行（stdin 不是终端）——否则没法输入 sudo 口令"
-    { : >/dev/tty; } 2>/dev/null || die "拿不到 /dev/tty，无法在这里提示口令"
+    [ -t 0 ] || die "$(t M_NEED_TTY)"
+    { : >/dev/tty; } 2>/dev/null || die "$(t M_NO_DEV_TTY)"
 }
 
 # ── 结果文件：让调用方（人或 AI）明确知道成功/失败/被取消 ────────────────────
@@ -88,7 +304,11 @@ need_tty() {
 write_result() {
     local id="$1" st="$2" msg="$3" ts
     ts="$(date '+%Y-%m-%dT%H:%M:%S%z')"
-    ssh_q "printf 'id=%s\nstatus=%s\nat=%s\nmessage=%s\n' '$id' '$st' '$ts' '$msg' > $REMOTE_DIR/$id.result" 2>/dev/null || true
+    # 走 stdin 而不是拼进远程命令：翻译里可能出现单引号（法语 l'humain 之类），
+    # 拼字符串会被引号截断，管道进去则任何字符都安全。
+    printf 'id=%s\nstatus=%s\nat=%s\nmessage=%s\n' "$id" "$st" "$ts" "$msg" \
+        | ssh ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" \
+              "cat > $REMOTE_DIR/$id.result" 2>/dev/null || true
 }
 
 list_queue() {
@@ -100,11 +320,11 @@ list_queue() {
 cmd_queue() {
     require_target
     local name="${1:-}"
-    [ -n "$name" ] || die "用法: agent-safe-input queue <名字> [--] '命令'  或  agent-safe-input queue <名字> <<'EOS' … EOS"
+    [ -n "$name" ] || die "$(t M_USAGE_QUEUE)"
     shift || true
     [ "${1:-}" = "--" ] && shift
 
-    local body; body="$(mktemp)" || die "mktemp 失败"
+    local body; body="$(mktemp)" || die "$(t M_MKTEMP)"
     # shellcheck disable=SC2064
     trap "rm -f '$body'" EXIT
 
@@ -113,7 +333,7 @@ cmd_queue() {
     else
         cat > "$body"
     fi
-    [ -s "$body" ] || die "脚本体是空的——要么跟在名字后面给命令，要么用 stdin 喂进来"
+    [ -s "$body" ] || die "$(t M_EMPTY_BODY)"
 
     local slug ts id
     slug="$(printf '%s' "$name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9._-]\+/-/g; s/^-*//; s/-*$//')"
@@ -121,61 +341,62 @@ cmd_queue() {
     ts="$(date +%Y%m%d-%H%M%S)"
     id="$ts-$slug"
 
-    local script; script="$(mktemp)" || die "mktemp 失败"
+    local script; script="$(mktemp)" || die "$(t M_MKTEMP)"
     {
         printf '#!/usr/bin/env bash\n'
-        printf '# 用途：%s\n' "$name"
-        printf '# 由 agent-safe-input %s 入队于 %s\n' "$VERSION" "$(date '+%Y-%m-%d %H:%M:%S %z')"
-        printf '# 执行方式：agent-safe-input run %s —— 由人确认脚本内容并输入自己的 sudo 口令\n' "$id"
+        printf '%s\n' "$(t M_HDR_PURPOSE "$name")"
+        printf '%s\n' "$(t M_HDR_QUEUED "$VERSION" "$(date '+%Y-%m-%d %H:%M:%S %z')")"
+        printf '%s\n' "$(t M_HDR_HOW "$id")"
         printf 'set -uo pipefail\n'
         printf 'cd "$HOME" 2>/dev/null || true\n'
         cat "$body"
     } > "$script"
 
     # 注意：这里不能用 -n——-n 会把 stdin 换成 /dev/null，脚本体就传不过去了
-    ssh ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" \
+    ssh -o LogLevel=ERROR ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" \
         "umask 077; mkdir -p $REMOTE_DIR; chmod 700 $REMOTE_DIR; cat > $REMOTE_DIR/$id.sh" \
-        < "$script" || { rm -f "$script"; die "入队失败：检查 SSH 连接与 $REMOTE_DIR 是否可写"; }
+        < "$script" || { rm -f "$script"; die "$(t M_QUEUE_FAIL "$REMOTE_DIR")"; }
     rm -f "$script"
 
     printf '%s\n' "$id"
-    info "已入队 $id（未执行）。请人运行：agent-safe-input run $id"
+    info "$(t M_QUEUED "$id" "$id")"
 }
 
 cmd_list() {
     require_target
     local files; files="$(list_queue)"
     if [ -z "$files" ]; then
-        info "队列为空——没有等待提权的任务。"
+        info "$(t M_EMPTY_QUEUE)"
         return 0
     fi
-    printf '待执行的 root 脚本：\n\n'
+    printf '%s\n\n' "$(t M_PENDING_HDR)"
     local f n=0 id size title
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         n=$((n + 1))
         id="$(basename "$f" .sh)"
         size="$(ssh_q "stat -c%s '$f'" 2>/dev/null | tr -d '\r')"
-        title="$(ssh_q "sed -n '2p' '$f' 2>/dev/null | sed 's/^# *//'" | tr -d '\r')"
-        printf '  %d) %s\n     %s  (%s 字节)\n' "$n" "$id" "${title:-（无说明）}" "${size:-?}"
+        # 第 2 行是 "# Purpose: 名字" / "# 用途：名字" —— 去掉注释符与前缀，只留名字
+        title="$(ssh_q "sed -n '2p' '$f' 2>/dev/null | sed 's/^# *//; s/^[^:：]*[:：][[:space:]]*//'" | tr -d '\r')"
+        printf '  %d) %s\n     %s  (%s)\n' "$n" "$id" "${title:-$(t M_NO_TITLE)}" "$(t M_BYTES "${size:-?}")"
     done <<< "$files"
-    printf '\n看内容：agent-safe-input show <id>\n执行：  agent-safe-input run <id>\n'
+    printf '\n%s\n' "$(t M_LIST_HINT)"
 }
 
 cmd_show() {
     require_target
     local id="${1:-}"
-    [ -n "$id" ] || die "用法: agent-safe-input show <id>"
-    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "队列里没有 $id"
+    [ -n "$id" ] || die "$(t M_USAGE_SHOW)"
+    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "$(t M_NOT_IN_QUEUE "$id")"
     printf '──────── %s.sh ────────\n' "$id"
     ssh_q "cat $REMOTE_DIR/$id.sh" | tr -d '\r'
-    printf '──────── 结束 ────────\n'
+    printf '──────── %s ────────\n' "$(t M_SHOW_END)"
 }
 
 cmd_result() {
     require_target
     local id="${1:-}"
-    [ -n "$id" ] || die "用法: agent-safe-input result <id>"
+    [ -n "$id" ] || die "$(t M_USAGE_RESULT)"
     ssh_q "cat $REMOTE_DIR/$id.result 2>/dev/null" | tr -d '\r'
 }
 
@@ -185,16 +406,16 @@ cmd_purge() {
     local n
     n="$(ssh_q "ls -1 $REMOTE_DIR/*.sh 2>/dev/null | wc -l" | tr -d '\r')"
     if [ "${n:-0}" -eq 0 ]; then
-        info "队列本来就是空的，无需清理。"
+        info "$(t M_PURGE_EMPTY)"
         return 0
     fi
-    if ! confirm "[agent-safe-input] 将删除队列里 $n 个脚本及其输出，输 y 确认、n 取消： "; then
-        write_result "_purge" cancelled "用户取消了操作，队列未清空"
-        info "✘ 用户取消了操作，队列未清空。"
+    if ! confirm "$(t M_PURGE_CONFIRM "$n")"; then
+        write_result "_purge" cancelled "$(t M_PURGE_CANCEL_MSG)"
+        info "$(t M_PURGE_CANCEL)"
         return 2
     fi
     ssh_q "rm -f $REMOTE_DIR/*.sh $REMOTE_DIR/*.log $REMOTE_DIR/*.result"
-    info "已清空队列"
+    info "$(t M_PURGE_DONE)"
 }
 
 cmd_run() {
@@ -206,60 +427,61 @@ cmd_run() {
         local cnt
         cnt="$(list_queue | grep -c . || true)"
         if [ "${cnt:-0}" -eq 0 ]; then
-            info "队列为空，没有要执行的脚本。"
+            info "$(t M_RUN_EMPTY)"
             return 0
         elif [ "${cnt:-0}" -eq 1 ]; then
             id="$(list_queue | head -1 | xargs -r basename | sed 's/\.sh$//')"
         else
             cmd_list
             printf '\n'
-            local pick
+            local pick low
             while :; do
-                printf '[agent-safe-input] 输入编号（1-%s）执行，输 n 取消： ' "$cnt"
+                printf '%s' "$(t M_PICK_PROMPT "$cnt")"
                 if ! IFS= read -r pick; then
                     printf '\n'
-                    write_result "_picker" cancelled "用户取消了操作，没有选择任何任务"
-                    info "✘ 用户取消了操作：没有选择任何任务。"
+                    write_result "_picker" cancelled "$(t M_PICK_CANCEL_MSG)"
+                    info "$(t M_PICK_CANCEL)"
                     return 2
                 fi
                 pick="$(printf '%s' "${pick%%$'\r'}" | tr -d '[:space:]')"
-                case "${pick,,}" in
+                low="$(printf '%s' "$pick" | tr 'A-Z' 'a-z')"
+                case "$low" in
                     n|no)
-                        write_result "_picker" cancelled "用户取消了操作，没有选择任何任务"
-                        info "✘ 用户取消了操作：没有选择任何任务。"
+                        write_result "_picker" cancelled "$(t M_PICK_CANCEL_MSG)"
+                        info "$(t M_PICK_CANCEL)"
                         return 2 ;;
                     ""|*[!0-9]*)
-                        printf '  ↑ 请输入 1-%s 之间的编号，或输 n 取消（刚才的输入已忽略）。\n' "$cnt" ;;
+                        printf '%s\n' "$(t M_PICK_INVALID "$cnt")" ;;
                     *)
                         if [ "$pick" -lt 1 ] || [ "$pick" -gt "$cnt" ]; then
-                            printf '  ↑ 编号超出范围（只有 1-%s），请重新输入。\n' "$cnt"
+                            printf '%s\n' "$(t M_PICK_RANGE "$cnt")"
                             continue
                         fi
                         id="$(list_queue | sed -n "${pick}p" | xargs -r basename | sed 's/\.sh$//')"
-                        [ -n "$id" ] || { printf '  ↑ 取不到第 %s 条，重来。\n' "$pick"; continue; }
+                        [ -n "$id" ] || { printf '%s\n' "$(t M_PICK_MISS "$pick")"; continue; }
                         break ;;
                 esac
             done
         fi
     fi
 
-    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "队列里没有 $id（agent-safe-input list 看现有 id）"
+    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "$(t M_RUN_MISSING "$id")"
 
-    printf '──────── 下面这个脚本将以 root 执行 ────────\n'
+    printf '%s\n' "$(t M_RUN_HDR)"
     ssh_q "cat $REMOTE_DIR/$id.sh" | tr -d '\r'
-    printf '────────────────────────────────────────────\n\n'
-    printf '确认无误就输入 y 继续；不想跑就输入 n。\n'
+    printf '%s\n\n' "$(t M_RUN_FTR)"
+    printf '%s\n' "$(t M_RUN_NOTE)"
 
-    if ! confirm "[agent-safe-input] 执行请输 y（yes），取消请输 n（no）： "; then
+    if ! confirm "$(t M_RUN_CONFIRM)"; then
         printf '\n'
-        write_result "$id" cancelled "用户取消了操作，脚本未执行，仍在队列里"
-        info "✘ 用户取消了操作：$id 未执行，仍留在队列里。"
+        write_result "$id" cancelled "$(t M_RUN_CANCEL_MSG)"
+        info "$(t M_RUN_CANCEL "$id")"
         return 2
     fi
 
     printf '\n'
-    printf '▶ 马上会出现  [sudo] password for <你>:  —— 直接输口令，屏幕上不会显示字符。\n'
-    printf '▶ 输错可以重试（sudo 给 3 次机会）。\n\n'
+    printf '%s\n' "$(t M_SUDO_1)"
+    printf '%s\n\n' "$(t M_SUDO_2)"
 
     # 清掉任何残留时间戳，确保这次一定要真输口令
     ssh_q 'sudo -k' 2>/dev/null
@@ -272,72 +494,58 @@ cmd_run() {
 
     printf '\n'
     case "$rc" in
-        0)   write_result "$id" success "执行成功，输出见 $REMOTE_DIR/$id.log"
-             info "✔ 执行成功。输出已存 $REMOTE_DIR/$id.log" ;;
-        255) write_result "$id" failed "SSH 连接失败（exit 255），未执行"
-             info "✘ SSH 连接失败（exit 255）：目标机可能已关机或网络不通" ;;
-        *)   write_result "$id" failed "执行失败（exit $rc），输出见 $REMOTE_DIR/$id.log"
-             info "✘ 执行失败（exit $rc）。常见原因：口令输错、脚本里的命令本身报错。"
-             info "  输出见 $REMOTE_DIR/$id.log" ;;
+        0)   write_result "$id" success "$(t M_OK_MSG "$REMOTE_DIR/$id.log")"
+             info "$(t M_OK "$REMOTE_DIR/$id.log")" ;;
+        255) write_result "$id" failed "$(t M_SSH_MSG)"
+             info "$(t M_SSH_FAIL)" ;;
+        *)   write_result "$id" failed "$(t M_FAIL_MSG "$rc" "$REMOTE_DIR/$id.log")"
+             info "$(t M_FAIL "$rc")"
+             info "$(t M_LOG_AT "$REMOTE_DIR/$id.log")" ;;
     esac
 
     if [ "$rc" -eq 0 ]; then
         ssh_q "mkdir -p $REMOTE_DIR/done && mv -f $REMOTE_DIR/$id.sh $REMOTE_DIR/done/ 2>/dev/null; true"
-        info "脚本已归档到 $REMOTE_DIR/done/（要复跑就 mv 回来）"
+        info "$(t M_ARCHIVED "$REMOTE_DIR/done/")"
     else
-        info "脚本仍在队列里，可修好后重跑。"
+        info "$(t M_STILL_QUEUED)"
     fi
     return "$rc"
 }
 
 cmd_status() {
     printf 'agent-safe-input %s\n' "$VERSION"
-    printf '  SSH 目标   : %s\n' "${SSH_TARGET:-（未配置）}"
-    printf '  SSH 参数   : %s\n' "${SSH_ARGS:-（无）}"
-    printf '  远端队列   : %s\n' "$REMOTE_DIR"
-    printf '  配置文件   : %s%s\n' "$CONFIG_FILE" "$([ -f "$CONFIG_FILE" ] && echo '' || echo '（不存在）')"
+    printf '  %-13s: %s\n' "$(t M_ST_TARGET)" "${SSH_TARGET:-$(t M_UNSET)}"
+    printf '  %-13s: %s\n' "$(t M_ST_ARGS)" "${SSH_ARGS:-$(t M_NONE)}"
+    printf '  %-13s: %s\n' "$(t M_ST_REMOTE)" "$REMOTE_DIR"
+    printf '  %-13s: %s%s\n' "$(t M_ST_CONFIG)" "$CONFIG_FILE" "$([ -f "$CONFIG_FILE" ] && printf '' || t M_MISSING)"
+    printf '  %-13s: %s\n' "$(t M_LANG_LINE)" "$LANG_TAG"
     [ -n "$SSH_TARGET" ] || return 0
     local n
     n="$(ssh_q "ls -1 $REMOTE_DIR/*.sh 2>/dev/null | wc -l" | tr -d '\r')"
-    printf '  待执行     : %s 条\n' "${n:-?}"
+    printf '  %-13s: %s\n' "$(t M_ST_PENDING)" "${n:-?}"
+}
+
+cmd_lang() {
+    printf '%s: %s\n' "$(t M_LANG_LINE)" "$LANG_TAG"
+    if [ -n "${I18N_FILE:-}" ]; then
+        printf '%s: %s\n' "$(t M_LANG_SRC)" "$I18N_FILE"
+    else
+        printf '%s: %s\n' "$(t M_LANG_SRC)" "$(t M_LANG_BUILTIN)"
+    fi
+    local list="en" dir f
+    while IFS= read -r dir; do
+        [ -n "$dir" ] && [ -d "$dir" ] || continue
+        for f in "$dir"/*.sh; do
+            [ -f "$f" ] || continue
+            list="$list $(basename "$f" .sh)"
+        done
+    done <<< "$(i18n_search_paths)"
+    printf '%s: %s\n' "$(t M_LANG_AVAIL)" "$(printf '%s\n' $list | sort -u | tr '\n' ' ' | sed 's/ $//')"
+    printf '%s\n' "$(t M_LANG_HOWTO)"
 }
 
 cmd_help() {
-    cat <<'EOF'
-agent-safe-input — let an AI agent run sudo, safely
-
-  让 AI 准备 root 命令、让你亲自批准并输口令。密码不进对话、不进脚本、不进日志。
-
-用法:
-  agent-safe-input queue <名字> [--] '命令'    把要 root 执行的事排进队列（不执行）
-  agent-safe-input queue <名字> <<'EOS'        ……或从 stdin 读整段脚本
-  ...多行命令...
-  EOS
-
-  agent-safe-input list                       列出队列
-  agent-safe-input show <id>                  查看某条脚本全文
-  agent-safe-input run [id]                   【由人运行】确认后执行，sudo 当场提示口令
-  agent-safe-input result <id>                查看执行结果（success/failed/cancelled）
-  agent-safe-input purge                     清空队列与历史输出
-  agent-safe-input status                    显示配置与队列概况
-  agent-safe-input help | version
-
-配置（环境变量优先）:
-  AGENT_SAFE_INPUT_SSH_TARGET   ssh 目标，如 user@host 或 ~/.ssh/config 里的别名
-  AGENT_SAFE_INPUT_SSH_ARGS     额外 ssh 参数，如 "-F ./ssh_config -p 2222"
-  AGENT_SAFE_INPUT_REMOTE_DIR   远端队列目录，默认 ~/.agent-safe-input/queue
-
-示例:
-  export AGENT_SAFE_INPUT_SSH_TARGET=user@192.168.1.10
-  agent-safe-input queue install-deps <<'EOS'
-  apt-get update
-  apt-get install -y --no-install-recommends build-essential
-  EOS
-  agent-safe-input run            # 你来看脚本、输 y、输口令
-
-退出码:
-  0 成功   2 用户取消   1 参数/连接/执行失败
-EOF
+    help_text
 }
 
 # ── 入口 ─────────────────────────────────────────────────────────────────────
@@ -349,7 +557,8 @@ case "${1:-}" in
     result|status-of)   shift; cmd_result "$@" ;;
     purge|clear)        cmd_purge ;;
     status)             cmd_status ;;
+    lang|languages|locale) cmd_lang ;;
     version|-V|--version) printf 'agent-safe-input %s\n' "$VERSION" ;;
     ""|-h|--help|help)  cmd_help ;;
-    *)                  die "未知子命令：$1（agent-safe-input help 看用法）" ;;
+    *)                  die "$(t M_UNKNOWN_CMD "$1")" ;;
 esac
