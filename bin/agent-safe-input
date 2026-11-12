@@ -11,7 +11,7 @@
 # =============================================================================
 set -uo pipefail
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 
 # ── 国际化（i18n）─────────────────────────────────────────────────────────────
 # 选择顺序：AGENT_SAFE_INPUT_LANG > LC_ALL > LC_MESSAGES > LANG > Windows 用户区域 > en
@@ -430,7 +430,7 @@ cmd_run() {
             info "$(t M_RUN_EMPTY)"
             return 0
         elif [ "${cnt:-0}" -eq 1 ]; then
-            id="$(list_queue | head -1 | xargs -r basename | sed 's/\.sh$//')"
+            id="$(list_queue | head -1 | sed 's#.*/##; s/\.sh$//')"
         else
             cmd_list
             printf '\n'
@@ -457,7 +457,7 @@ cmd_run() {
                             printf '%s\n' "$(t M_PICK_RANGE "$cnt")"
                             continue
                         fi
-                        id="$(list_queue | sed -n "${pick}p" | xargs -r basename | sed 's/\.sh$//')"
+                        id="$(list_queue | sed -n "${pick}p" | sed 's#.*/##; s/\.sh$//')"
                         [ -n "$id" ] || { printf '%s\n' "$(t M_PICK_MISS "$pick")"; continue; }
                         break ;;
                 esac

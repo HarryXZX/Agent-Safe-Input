@@ -59,10 +59,18 @@ Agent 轮询 `agent-safe-input result <id>` 就能继续干活：它只知道**�
 ```bash
 git clone https://github.com/HarryXZX/Agent-Safe-Input.git
 mkdir -p ~/.local/bin && cp Agent-Safe-Input/bin/agent-safe-input ~/.local/bin/
-# 确认 ~/.local/bin 在 PATH 里
+# Windows / Git Bash 建议放 ~/bin —— Git Bash 默认把它加进 PATH，不用改任何配置
+# 确认目标目录在 PATH 里
 
 # 可选：名字有点长，加个别名
 echo "alias asi=agent-safe-input" >> ~/.bashrc
+```
+
+装完先把语言包也放到位（否则只有英文界面）：
+
+```bash
+mkdir -p ~/.local/share/agent-safe-input && cp -r Agent-Safe-Input/i18n ~/.local/share/agent-safe-input/
+agent-safe-input lang    # 看当前用的是哪种、语言包从哪加载
 ```
 
 依赖：
@@ -329,10 +337,18 @@ never *how* to authenticate.
 ```bash
 git clone https://github.com/HarryXZX/Agent-Safe-Input.git
 mkdir -p ~/.local/bin && cp Agent-Safe-Input/bin/agent-safe-input ~/.local/bin/
-# make sure ~/.local/bin is on PATH
+# on Windows / Git Bash prefer ~/bin — Git Bash puts it on PATH by default, no config needed
+# make sure the target directory is on PATH
 
 # optional: a short alias, because the full name is a mouthful
 echo "alias asi=agent-safe-input" >> ~/.bashrc
+```
+
+Drop the language packs in place too, otherwise the interface stays English-only:
+
+```bash
+mkdir -p ~/.local/share/agent-safe-input && cp -r Agent-Safe-Input/i18n ~/.local/share/agent-safe-input/
+agent-safe-input lang    # which language is active, and where it was loaded from
 ```
 
 Requirements:
