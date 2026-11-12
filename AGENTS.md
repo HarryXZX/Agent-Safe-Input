@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for an AI agent that has SSH access to a host through Agent-Sudo-Gate.
+Instructions for an AI agent that has SSH access to a host through Agent-Safe-Input.
 
 **Read this before you run anything that needs root.**
 
@@ -13,8 +13,8 @@ Instructions for an AI agent that has SSH access to a host through Agent-Sudo-Ga
 | SSH to the target host | ✅ key-based, passwordless |
 | Read / write your home directory, build, pull code, run tests | ✅ |
 | `sudo` | ❌ it will ask for a password, and **you do not have one** |
-| `agent-sudo-gate queue` / `list` / `show` / `result` | ✅ |
-| `agent-sudo-gate run` / `purge` | ❌ human-only (requires a TTY) |
+| `agent-safe-input queue` / `list` / `show` / `result` | ✅ |
+| `agent-safe-input run` / `purge` | ❌ human-only (requires a TTY) |
 
 You are not "broken" or under-privileged by accident. The asymmetry is the design: you can
 do the work, you cannot move the foundations.
@@ -27,7 +27,7 @@ All of those waste turns and none of them can succeed.
 Batch everything a task needs into **one** script and queue it:
 
 ```bash
-agent-sudo-gate queue install-build-deps <<'EOS'
+agent-safe-input queue install-build-deps <<'EOS'
 apt-get update
 apt-get install -y --no-install-recommends build-essential cmake ninja-build
 EOS
@@ -37,7 +37,7 @@ EOS
 Then tell the human, in one short message:
 
 > Queued `20261112-134107-install-build-deps`. Please run:
-> `agent-sudo-gate run 20261112-134107-install-build-deps`
+> `agent-safe-input run 20261112-134107-install-build-deps`
 
 **Batch aggressively.** Ten small requests = ten interruptions. One request that covers the
 whole task is the goal. If you must split, split by *decision* ("install deps" then
@@ -48,7 +48,7 @@ whole task is the goal. If you must split, split by *decision* ("install deps" t
 Poll the result file — never guess from a log:
 
 ```bash
-agent-sudo-gate result 20261112-134107-install-build-deps
+agent-safe-input result 20261112-134107-install-build-deps
 ```
 
 ```ini
@@ -77,16 +77,16 @@ Exit codes mirror this: `0` success, `2` cancelled, anything else = failure.
 3. **Never put secrets in a queued script.** The script is stored on the remote disk
    (`0600`) and printed to the human's terminal. No tokens, no private keys, no passwords.
    Fetch secrets at runtime, or let the human inject them.
-4. **Never call `agent-sudo-gate run`.** It refuses without a TTY, and trying is noise. The human
+4. **Never call `agent-safe-input run`.** It refuses without a TTY, and trying is noise. The human
    runs it.
 5. **The script you queue must be readable.** Add a one-line comment at the top explaining
-   the purpose; it is shown as the title in `agent-sudo-gate list` — that line is what the human
+   the purpose; it is shown as the title in `agent-safe-input list` — that line is what the human
    reads before approving.
 
 ## 5. Good request shape
 
 ```bash
-agent-sudo-gate queue add-32bit-toolchain <<'EOS'
+agent-safe-input queue add-32bit-toolchain <<'EOS'
 # Purpose: enable i386 multiarch + gcc-multilib so `gcc -m32` works
 dpkg --add-architecture i386
 apt-get update
@@ -100,7 +100,7 @@ Why this is good: one purpose, states why, only the commands that need root, no 
 ## 6. Known pitfalls
 
 - **`ssh -n` and stdin**: anything that pipes a file into the remote shell must *not* use
-  `-n` (it replaces stdin with `/dev/null`). Agent-Sudo-Gate handles this internally; if you write
+  `-n` (it replaces stdin with `/dev/null`). Agent-Safe-Input handles this internally; if you write
   your own helper, remember it.
 - **Non-interactive SSH does not load `~/.bashrc`**: if a command needs environment
   variables, run it through `bash -lc '...'`.

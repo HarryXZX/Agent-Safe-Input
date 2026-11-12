@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Wrapper for the Windows launcher: run `agent-sudo-gate run`, then hold the window open
+# Wrapper for the Windows launcher: run `agent-safe-input run`, then hold the window open
 # so the human can read the output. Arguments are passed through (an <id> is optional).
 set -u
 
-if ! command -v agent-sudo-gate >/dev/null 2>&1; then
-    echo "agent-sudo-gate was not found on PATH."
+if ! command -v agent-safe-input >/dev/null 2>&1; then
+    echo "agent-safe-input was not found on PATH."
     echo
     echo "Install it first:"
-    echo '  mkdir -p ~/.local/bin && cp bin/agent-sudo-gate ~/.local/bin/'
+    echo '  mkdir -p ~/.local/bin && cp bin/agent-safe-input ~/.local/bin/'
     echo
     read -r -p "Press Enter to close..." _ 2>/dev/null || true
     exit 127
 fi
 
-agent-sudo-gate run "$@"
+agent-safe-input run "$@"
 rc=$?
 
 echo

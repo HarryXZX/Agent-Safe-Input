@@ -1,13 +1,13 @@
 @echo off
 rem ============================================================
-rem  Agent-Sudo-Gate - Windows launcher
+rem  Agent-Safe-Input - Windows launcher
 rem
-rem  Double-click to open a terminal that runs:  agent-sudo-gate run
+rem  Double-click to open a terminal that runs:  agent-safe-input run
 rem  Optional argument: an id, to skip the picker
-rem      agent-sudo-gate-window.bat 20261112-134107-install-deps
+rem      agent-safe-input-window.bat 20261112-134107-install-deps
 rem
 rem  Requires Git for Windows (provides bash and mintty).
-rem  agent-sudo-gate itself must be on PATH (see README).
+rem  agent-safe-input itself must be on PATH (see README).
 rem ============================================================
 setlocal
 set "GITBASH=C:\Program Files\Git\bin\bash.exe"
@@ -22,8 +22,8 @@ if not exist "%GITBASH%" (
 )
 
 if exist "%MINTTY%" (
-    start "" "%MINTTY%" --hold=always -t "Agent-Sudo-Gate" -e "%GITBASH%" "%~dp0agent-sudo-gate-window.sh" %*
+    start "" "%MINTTY%" --hold=always -t "Agent-Safe-Input" -e "%GITBASH%" "%~dp0agent-safe-input-window.sh" %*
 ) else (
-    "%GITBASH%" "%~dp0agent-sudo-gate-window.sh" %*
+    "%GITBASH%" "%~dp0agent-safe-input-window.sh" %*
 )
 endlocal

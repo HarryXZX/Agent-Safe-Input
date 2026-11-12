@@ -1,7 +1,7 @@
-# Agent-Sudo-Gate
+# Agent-Safe-Input
 
-**给 AI Agent 装一道密码闸门。**
-Agent 写命令，你看一眼，你输自己的 sudo 口令。
+**让 Agent 安全地输入口令。**
+Agent 写命令，你过一眼，你在自己的终端里输 sudo 口令——口令只经过你的键盘。
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20WSL%20%7C%20Git%20Bash-lightgrey)
@@ -19,7 +19,7 @@ Agent 写命令，你看一眼，你输自己的 sudo 口令。
 | 把口令贴进对话 | 口令进了会话记录文件、备份、服务商日志——永久留下。只能靠改口令补救 |
 | 每条 `sudo` 都你亲手敲 | 长任务被打断成碎片，Agent 每三条命令就卡住等你 |
 
-Agent-Sudo-Gate 把这件事从中间切开：
+Agent-Safe-Input 把这件事从中间切开：
 
 - **Agent** 能干一切不需要 root 的活；真需要 root 时，它只能**描述**：把要做的事写成
   脚本，放进远端的一个队列里。
@@ -29,13 +29,13 @@ Agent-Sudo-Gate 把这件事从中间切开：
 ## 工作方式
 
 ```
-┌─────────────┐  ① agent-sudo-gate queue install-deps <<EOS      ┌─────────────────────┐
+┌─────────────┐  ① agent-safe-input queue install-deps <<EOS      ┌─────────────────────┐
 │   Agent     │ ──────────────────────────────────────────▶ │  远端主机           │
-│  （无 root）│      返回：20261112-134107-install-deps     │  ~/.agent-sudo-gate/queue │
+│  （无 root）│      返回：20261112-134107-install-deps     │  ~/.agent-safe-input/queue │
 └─────────────┘                                             │   <id>.sh   (0600)  │
                                                             └──────────┬──────────┘
                                                                        │
-┌─────────────┐  ② agent-sudo-gate run <id>                                 │
+┌─────────────┐  ② agent-safe-input run <id>                                 │
 │   人        │ ◀──────────────────────────────────────────────────────┘
 │             │  ③ 看到**完整脚本** → 输 y → 输 sudo 口令
 └─────────────┘
@@ -43,38 +43,38 @@ Agent-Sudo-Gate 把这件事从中间切开：
        └──────▶    <id>.log（输出）   <id>.result（status=success|failed|cancelled）
 ```
 
-Agent 轮询 `agent-sudo-gate result <id>` 就能继续干活：它只知道**成没成**，永远不知道
+Agent 轮询 `agent-safe-input result <id>` 就能继续干活：它只知道**成没成**，永远不知道
 **怎么认证**。
 
 ## 安装
 
 ```bash
-git clone https://github.com/HarryXZX/Agent-Sudo-Gate.git
-mkdir -p ~/.local/bin && cp Agent-Sudo-Gate/bin/agent-sudo-gate ~/.local/bin/
+git clone https://github.com/HarryXZX/Agent-Safe-Input.git
+mkdir -p ~/.local/bin && cp Agent-Safe-Input/bin/agent-safe-input ~/.local/bin/
 # 确认 ~/.local/bin 在 PATH 里
 
 # 可选：名字有点长，加个别名
-echo "alias asg=agent-sudo-gate" >> ~/.bashrc
+echo "alias asi=agent-safe-input" >> ~/.bashrc
 ```
 
 依赖：
 
-- 跑 `agent-sudo-gate` 的机器上有 `bash` 和 `ssh`（Linux / macOS / WSL / Git Bash 均可）
+- 跑 `agent-safe-input` 的机器上有 `bash` 和 `ssh`（Linux / macOS / WSL / Git Bash 均可）
 - 到目标机的 **SSH 密钥登录**（Agent 用密钥，不用口令）
 - 目标机的 `sudo` **需要口令**（也就是没有 `NOPASSWD`）
 
 ## 配置
 
-`~/.config/agent-sudo-gate/config`（三项都可省）：
+`~/.config/agent-safe-input/config`（三项都可省）：
 
 ```ini
 SSH_TARGET=user@192.168.1.10
 SSH_ARGS=-F ~/.ssh/config-vm
-REMOTE_DIR=~/.agent-sudo-gate/queue
+REMOTE_DIR=~/.agent-safe-input/queue
 ```
 
-环境变量优先于配置文件：`AGENT_SUDO_GATE_SSH_TARGET`、`AGENT_SUDO_GATE_SSH_ARGS`、
-`AGENT_SUDO_GATE_REMOTE_DIR`、`AGENT_SUDO_GATE_CONFIG_FILE`。
+环境变量优先于配置文件：`AGENT_SAFE_INPUT_SSH_TARGET`、`AGENT_SAFE_INPUT_SSH_ARGS`、
+`AGENT_SAFE_INPUT_REMOTE_DIR`、`AGENT_SAFE_INPUT_CONFIG_FILE`。
 
 `SSH_TARGET` 可以是 `user@host`，也可以是 `~/.ssh/config` 里的 `Host` 别名。
 
@@ -82,18 +82,18 @@ REMOTE_DIR=~/.agent-sudo-gate/queue
 
 ```bash
 # ── Agent 这半边 ────────────────────────────────────────────────
-export AGENT_SUDO_GATE_SSH_TARGET=user@192.168.1.10
+export AGENT_SAFE_INPUT_SSH_TARGET=user@192.168.1.10
 
-agent-sudo-gate queue install-build-deps <<'EOS'
+agent-safe-input queue install-build-deps <<'EOS'
 apt-get update
 apt-get install -y --no-install-recommends build-essential cmake ninja-build
 EOS
 # 标准输出：20261112-134107-install-build-deps
 
 # ── 人这半边，在你自己的终端里 ──────────────────────────────────
-agent-sudo-gate list                       # 看有什么在等
-agent-sudo-gate show 20261112-134107-install-build-deps
-agent-sudo-gate run  20261112-134107-install-build-deps
+agent-safe-input list                       # 看有什么在等
+agent-safe-input show 20261112-134107-install-build-deps
+agent-safe-input run  20261112-134107-install-build-deps
 #   → 再打一遍完整脚本
 #   → "执行请输 y（yes），取消请输 n（no）："  输 y
 #   → "[sudo] password for you:"               输口令（不回显）
@@ -103,13 +103,13 @@ agent-sudo-gate run  20261112-134107-install-build-deps
 
 | 命令 | 谁用 | 作用 |
 |---|---|---|
-| `agent-sudo-gate queue <名字> [--] '命令'` | Agent | 把脚本排进队列（也可用 heredoc 从 stdin 读）。打印 `<id>`，**不执行** |
-| `agent-sudo-gate list` | 都行 | 列出待执行脚本、用途、大小 |
-| `agent-sudo-gate show <id>` | 都行 | 打印某条脚本全文 |
-| `agent-sudo-gate run [id]` | **人** | 显示 → 确认 → 用 `sudo` 执行，口令提示由 `sudo` 自己发 |
-| `agent-sudo-gate result <id>` | Agent | 读结果文件（`status=…`） |
-| `agent-sudo-gate purge` | 人 | 清空队列和历史输出 |
-| `agent-sudo-gate status` | 都行 | 显示配置与待执行条数 |
+| `agent-safe-input queue <名字> [--] '命令'` | Agent | 把脚本排进队列（也可用 heredoc 从 stdin 读）。打印 `<id>`，**不执行** |
+| `agent-safe-input list` | 都行 | 列出待执行脚本、用途、大小 |
+| `agent-safe-input show <id>` | 都行 | 打印某条脚本全文 |
+| `agent-safe-input run [id]` | **人** | 显示 → 确认 → 用 `sudo` 执行，口令提示由 `sudo` 自己发 |
+| `agent-safe-input result <id>` | Agent | 读结果文件（`status=…`） |
+| `agent-safe-input purge` | 人 | 清空队列和历史输出 |
+| `agent-safe-input status` | 都行 | 显示配置与待执行条数 |
 
 交互确认只认四个词、**不分大小写**：`y` / `yes` 执行，`n` / `no` 取消。其它任何输入
 （包括空回车、手滑打错）都**忽略并重问**，所以打错字不会把流程弄崩。不带 id 运行且队列
@@ -152,7 +152,7 @@ message=用户取消了操作，脚本未执行，仍在队列里
 - **不留口令缓存**。执行前后各一次 `sudo -k`，那 15 分钟的时间戳窗口无法被同一账户的
   其它会话复用。
 - **脚本 `0600`**，放在远端 `0700` 目录下。
-- **拒绝非交互调用**。`agent-sudo-gate run` 要求真 TTY，自动化（或 Agent）没法无头触发。
+- **拒绝非交互调用**。`agent-safe-input run` 要求真 TTY，自动化（或 Agent）没法无头触发。
 - **人看到的就是将要执行的字节**，在确认提示之前完整打印。
 
 不保证这些：
@@ -168,13 +168,13 @@ message=用户取消了操作，脚本未执行，仍在队列里
 
 仓库里带 [`AGENTS.md`](AGENTS.md)，Agent 动特权命令前应当先读。要点：
 
-> 你只有密钥、没有口令。把需要 root 的活**攒成一个脚本**用 `agent-sudo-gate queue` 排队，
-> 然后请人执行 `agent-sudo-gate run <id>`。永远不要索要口令、不要碰 `sudoers`；
+> 你只有密钥、没有口令。把需要 root 的活**攒成一个脚本**用 `agent-safe-input queue` 排队，
+> 然后请人执行 `agent-safe-input run <id>`。永远不要索要口令、不要碰 `sudoers`；
 > `status=cancelled` 表示「人拒绝了」，不是「失败了要重试」。
 
 ## Windows 启动器
 
-`windows/agent-sudo-gate-window.bat` —— 双击弹出一个终端跑 `agent-sudo-gate run`，跑完不自动关窗。
+`windows/agent-safe-input-window.bat` —— 双击弹出一个终端跑 `agent-safe-input run`，跑完不自动关窗。
 需要 Git for Windows（提供 `bash` 和 `mintty`）。适用于 Agent 本身是无头进程、没法自己
 弹窗的场景。
 
@@ -193,7 +193,7 @@ message=用户取消了操作，脚本未执行，仍在队列里
 照样可用——它退化成一个纯审查闸门：脚本仍然必须由人批准才会执行。结果契约和审计链路不变。
 
 **多个 Agent 能共用一个队列吗？**
-队列是按远端用户放的（`~/.agent-sudo-gate/queue`）。给不同的 `REMOTE_DIR` 就是不同的队列。
+队列是按远端用户放的（`~/.agent-safe-input/queue`）。给不同的 `REMOTE_DIR` 就是不同的队列。
 
 ## 许可
 

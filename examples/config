@@ -1,6 +1,6 @@
-# Agent-Sudo-Gate 配置示例
-#   放到 ~/.config/agent-sudo-gate/config（Windows 下为 C:/Users/<你>/.config/agent-sudo-gate/config）
-#   环境变量优先：AGENT_SUDO_GATE_SSH_TARGET / AGENT_SUDO_GATE_SSH_ARGS / AGENT_SUDO_GATE_REMOTE_DIR
+# Agent-Safe-Input 配置示例
+#   放到 ~/.config/agent-safe-input/config（Windows 下为 C:/Users/<你>/.config/agent-safe-input/config）
+#   环境变量优先：AGENT_SAFE_INPUT_SSH_TARGET / AGENT_SAFE_INPUT_SSH_ARGS / AGENT_SAFE_INPUT_REMOTE_DIR
 
 # 目标机：user@host，或 ~/.ssh/config 里的 Host 别名
 SSH_TARGET=user@192.168.1.10
@@ -9,5 +9,5 @@ SSH_TARGET=user@192.168.1.10
 # SSH_ARGS=-F ~/.ssh/config-vm
 # SSH_ARGS=-i ~/.ssh/id_ed25519 -p 2222
 
-# 远端队列目录（可选，默认 ~/.agent-sudo-gate/queue）
-# REMOTE_DIR=~/.agent-sudo-gate/queue
+# 远端队列目录（可选，默认 ~/.agent-safe-input/queue）
+# REMOTE_DIR=~/.agent-safe-input/queue

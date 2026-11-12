@@ -1,8 +1,8 @@
-# Agent-Sudo-Gate
+# Agent-Safe-Input
 
-**A password gate for AI agents that need `sudo`.**
-The agent writes the command. You approve it. You type the password — it never leaves your
-keyboard.
+**Let an AI agent do privileged work — safely.**
+The agent writes the command. You approve it. You type the password, and it never leaves
+your keyboard.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20WSL%20%7C%20Git%20Bash-lightgrey)
@@ -21,7 +21,7 @@ them are bad:
 | Paste your password into the chat | It is now in the transcript file, in backups, in the provider's logs. Forever. Rotating it is the only fix. |
 | Do every `sudo` yourself, by hand | Breaks long autonomous runs: the agent stalls at every third command, waiting for you. |
 
-Agent-Sudo-Gate splits the job where it naturally splits:
+Agent-Safe-Input splits the job where it naturally splits:
 
 - **The agent** can do everything that does not need root — and when it does need root,
   it can only *describe* it: write a script into a queue on the remote host.
@@ -32,13 +32,13 @@ Agent-Sudo-Gate splits the job where it naturally splits:
 ## How it works
 
 ```
-┌─────────────┐  1. agent-sudo-gate queue install-deps <<EOS      ┌─────────────────────┐
+┌─────────────┐  1. agent-safe-input queue install-deps <<EOS      ┌─────────────────────┐
 │   Agent     │ ──────────────────────────────────────────▶ │  remote host        │
-│  (no root)  │      gets back: 20261112-134107-install-…   │  ~/.agent-sudo-gate/queue │
+│  (no root)  │      gets back: 20261112-134107-install-…   │  ~/.agent-safe-input/queue │
 └─────────────┘                                             │   <id>.sh   (0600)  │
                                                             └──────────┬──────────┘
                                                                        │
-┌─────────────┐  2. agent-sudo-gate run <id>                                 │
+┌─────────────┐  2. agent-safe-input run <id>                                 │
 │   Human     │ ◀──────────────────────────────────────────────────────┘
 │             │  3. sees the FULL script, types y, then types the sudo password
 └─────────────┘
@@ -46,38 +46,38 @@ Agent-Sudo-Gate splits the job where it naturally splits:
        └──────▶    <id>.log  (output)   <id>.result  (status=success|failed|cancelled)
 ```
 
-The agent polls `agent-sudo-gate result <id>` and continues — it learns *that* it succeeded,
+The agent polls `agent-safe-input result <id>` and continues — it learns *that* it succeeded,
 never *how* to authenticate.
 
 ## Install
 
 ```bash
-git clone https://github.com/HarryXZX/Agent-Sudo-Gate.git
-mkdir -p ~/.local/bin && cp Agent-Sudo-Gate/bin/agent-sudo-gate ~/.local/bin/
+git clone https://github.com/HarryXZX/Agent-Safe-Input.git
+mkdir -p ~/.local/bin && cp Agent-Safe-Input/bin/agent-safe-input ~/.local/bin/
 # make sure ~/.local/bin is on PATH
 
 # optional: a short alias, because the full name is a mouthful
-echo "alias asg=agent-sudo-gate" >> ~/.bashrc
+echo "alias asi=agent-safe-input" >> ~/.bashrc
 ```
 
 Requirements:
 
-- `bash` and `ssh` on the machine that runs `agent-sudo-gate` (Linux, macOS, WSL, Git Bash)
+- `bash` and `ssh` on the machine that runs `agent-safe-input` (Linux, macOS, WSL, Git Bash)
 - key-based SSH to the target host (**the agent uses a key, not a password**)
 - `sudo` on the target that asks for a password (i.e. **no** `NOPASSWD`)
 
 ## Configure
 
-`~/.config/agent-sudo-gate/config` (all keys optional):
+`~/.config/agent-safe-input/config` (all keys optional):
 
 ```ini
 SSH_TARGET=user@192.168.1.10
 SSH_ARGS=-F ~/.ssh/config-vm
-REMOTE_DIR=~/.agent-sudo-gate/queue
+REMOTE_DIR=~/.agent-safe-input/queue
 ```
 
-Environment variables win over the file: `AGENT_SUDO_GATE_SSH_TARGET`, `AGENT_SUDO_GATE_SSH_ARGS`,
-`AGENT_SUDO_GATE_REMOTE_DIR`, `AGENT_SUDO_GATE_CONFIG_FILE`.
+Environment variables win over the file: `AGENT_SAFE_INPUT_SSH_TARGET`, `AGENT_SAFE_INPUT_SSH_ARGS`,
+`AGENT_SAFE_INPUT_REMOTE_DIR`, `AGENT_SAFE_INPUT_CONFIG_FILE`.
 
 `SSH_TARGET` can be any `user@host` **or** a `Host` alias from your `~/.ssh/config`.
 
@@ -85,18 +85,18 @@ Environment variables win over the file: `AGENT_SUDO_GATE_SSH_TARGET`, `AGENT_SU
 
 ```bash
 # ── the agent does this ─────────────────────────────────────────────
-export AGENT_SUDO_GATE_SSH_TARGET=user@192.168.1.10
+export AGENT_SAFE_INPUT_SSH_TARGET=user@192.168.1.10
 
-agent-sudo-gate queue install-build-deps <<'EOS'
+agent-safe-input queue install-build-deps <<'EOS'
 apt-get update
 apt-get install -y --no-install-recommends build-essential cmake ninja-build
 EOS
 # stdout: 20261112-134107-install-build-deps
 
 # ── you do this, in your own terminal ───────────────────────────────
-agent-sudo-gate list                       # what is waiting
-agent-sudo-gate show 20261112-134107-install-build-deps
-agent-sudo-gate run  20261112-134107-install-build-deps
+agent-safe-input list                       # what is waiting
+agent-safe-input show 20261112-134107-install-build-deps
+agent-safe-input run  20261112-134107-install-build-deps
 #   → prints the whole script again
 #   → "执行请输 y（yes），取消请输 n（no）:"   type y
 #   → "[sudo] password for you:"              type your password (not echoed)
@@ -106,13 +106,13 @@ agent-sudo-gate run  20261112-134107-install-build-deps
 
 | Command | Who runs it | What it does |
 |---|---|---|
-| `agent-sudo-gate queue <name> [--] 'cmd'` | agent | Queue a script (also accepts a heredoc on stdin). Prints the new `<id>`. **Never executes.** |
-| `agent-sudo-gate list` | either | List pending scripts with their purpose and size |
-| `agent-sudo-gate show <id>` | either | Print one script in full |
-| `agent-sudo-gate run [id]` | **human** | Show, confirm, then run with `sudo` — the password prompt comes from `sudo` itself |
-| `agent-sudo-gate result <id>` | agent | Print the result file (`status=…`) |
-| `agent-sudo-gate purge` | human | Empty the queue and remove outputs |
-| `agent-sudo-gate status` | either | Show config and how many scripts are pending |
+| `agent-safe-input queue <name> [--] 'cmd'` | agent | Queue a script (also accepts a heredoc on stdin). Prints the new `<id>`. **Never executes.** |
+| `agent-safe-input list` | either | List pending scripts with their purpose and size |
+| `agent-safe-input show <id>` | either | Print one script in full |
+| `agent-safe-input run [id]` | **human** | Show, confirm, then run with `sudo` — the password prompt comes from `sudo` itself |
+| `agent-safe-input result <id>` | agent | Print the result file (`status=…`) |
+| `agent-safe-input purge` | human | Empty the queue and remove outputs |
+| `agent-safe-input status` | either | Show config and how many scripts are pending |
 
 Interaction accepts exactly four words, **case-insensitive**: `y` / `yes` = run,
 `n` / `no` = cancel. Anything else (empty line included) is ignored and re-asked, so a
@@ -149,14 +149,14 @@ This is the whole point of the result file: an agent cannot tell "cancelled" fro
 
 ## Security model
 
-What Agent-Sudo-Gate guarantees:
+What Agent-Safe-Input guarantees:
 
 - **The password is never seen by the agent.** `sudo` reads it from the remote TTY. It is
   not passed as an argument, not stored, not echoed, not logged.
 - **No password cache is left behind.** `sudo -k` runs before *and* after every execution,
   so the 15-minute timestamp window cannot be reused by another session of the same user.
 - **Scripts are stored `0600`** in a `0700` directory on the remote host.
-- **Non-interactive invocation is refused.** `agent-sudo-gate run` requires a real TTY, so an
+- **Non-interactive invocation is refused.** `agent-safe-input run` requires a real TTY, so an
   automation (or an agent) cannot trigger it headlessly.
 - **The human sees the exact bytes that will run**, printed before the confirmation prompt.
 
@@ -177,14 +177,14 @@ This repository ships [`AGENTS.md`](AGENTS.md) — a contract an agent can read 
 touching a privileged command. The short version:
 
 > You have a key, not a password. Batch privileged work into one script with
-> `agent-sudo-gate queue`, then ask the human to run `agent-sudo-gate run <id>`. Never ask for the
+> `agent-safe-input queue`, then ask the human to run `agent-safe-input run <id>`. Never ask for the
 > password, never write to `sudoers`, and treat `status=cancelled` as "the human said no" —
 > not as a failure to retry.
 
 ## Windows launcher
 
-`windows/agent-sudo-gate-window.bat` — double-click to open a terminal that runs
-`agent-sudo-gate run` and stays open afterwards. Requires Git for Windows (provides `bash` and
+`windows/agent-safe-input-window.bat` — double-click to open a terminal that runs
+`agent-safe-input run` and stays open afterwards. Requires Git for Windows (provides `bash` and
 `mintty`). Useful when the agent runs headless and cannot pop a window itself.
 
 ## FAQ
@@ -204,7 +204,7 @@ Yes — the tool then degrades into a pure review gate: the script still has to 
 by a human before it runs. The result contract and audit trail are unchanged.
 
 **Can two people/agents share a queue?**
-The queue is per-remote-user (`~/.agent-sudo-gate/queue`). Different `REMOTE_DIR` values give
+The queue is per-remote-user (`~/.agent-safe-input/queue`). Different `REMOTE_DIR` values give
 you separate queues.
 
 ## License
