@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+# agent-sudo-gate — a password gate for AI agents that need sudo
+#
+# 工作方式：
+#   AI 只负责「把要 root 干的事写成脚本」并放进远端队列（agent-sudo-gate queue）；
+#   人负责「看脚本 + 输入自己的 sudo 口令」执行它（agent-sudo-gate run）。
+#   口令永远不会出现在命令行、脚本、日志或对话里——只有你的键盘和 TTY 见过它。
+#
+# 用法：agent-sudo-gate help
+# 许可：MIT
+# =============================================================================
+set -uo pipefail
+
+VERSION="0.1.0"
+
+# ── 输出 ─────────────────────────────────────────────────────────────────────
+die()  { printf 'agent-sudo-gate: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'agent-sudo-gate: %s\n' "$*" >&2; }
+info() { printf 'agent-sudo-gate: %s\n' "$*" >&2; }
+
+# ── 配置：env > 配置文件 > 默认值 ─────────────────────────────────────────────
+CONFIG_FILE="${AGENT_SUDO_GATE_CONFIG_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-sudo-gate/config}"
+CFG_SSH_TARGET=""
+CFG_SSH_ARGS=""
+CFG_REMOTE_DIR=""
+
+if [ -f "$CONFIG_FILE" ]; then
+    while IFS='=' read -r k v; do
+        # 去掉两端空白与 CR，跳过注释与空行
+        k="$(printf '%s' "${k%%$'\r'}" | tr -d '[:space:]')"
+        v="$(printf '%s' "${v%%$'\r'}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        case "$k" in
+            ''|\#*) continue ;;
+            SSH_TARGET) CFG_SSH_TARGET="$v" ;;
+            SSH_ARGS)   CFG_SSH_ARGS="$v" ;;
+            REMOTE_DIR) CFG_REMOTE_DIR="$v" ;;
+        esac
+    done < "$CONFIG_FILE"
+fi
+
+SSH_TARGET="${AGENT_SUDO_GATE_SSH_TARGET:-${CFG_SSH_TARGET:-}}"
+SSH_ARGS="${AGENT_SUDO_GATE_SSH_ARGS:-${CFG_SSH_ARGS:-}}"
+REMOTE_DIR="${AGENT_SUDO_GATE_REMOTE_DIR:-${CFG_REMOTE_DIR:-~/.agent-sudo-gate/queue}}"
+
+SSH_ARGS_ARR=()
+if [ -n "$SSH_ARGS" ]; then
+    read -r -a SSH_ARGS_ARR <<< "$SSH_ARGS"
+fi
+
+# 非交互查询用 -n：否则 ssh 会把 stdin（用户待输入的 y/n）整段吞掉
+ssh_q() { ssh -n ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
+# 交互执行：必须保留 TTY，sudo 才能提示口令
+ssh_t() { ssh -t ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" "$@"; }
+
+require_target() {
+    [ -n "$SSH_TARGET" ] || die "没有配置 SSH 目标。设环境变量 AGENT_SUDO_GATE_SSH_TARGET=user@host，或写进 $CONFIG_FILE 的 SSH_TARGET= 一行（见 examples/config）"
+}
+
+# ── 交互确认：只认 y/yes/n/no，其它输入忽略重问 ──────────────────────────────
+# 返回 0=继续，1=取消（含输入结束/终端关闭）
+confirm() {
+    local prompt="${1:-继续？}" a
+    while :; do
+        printf '%s' "$prompt"
+        if ! IFS= read -r a; then
+            printf '\n'
+            return 1
+        fi
+        a="$(printf '%s' "${a%%$'\r'}" | tr -d '[:space:]')"
+        case "${a,,}" in
+            y|yes) return 0 ;;
+            n|no)  return 1 ;;
+            "")    printf '  ↑ 没有输入内容。请输入 y 或 n（大小写都行）。\n' ;;
+            *)     printf '  ↑ 只接受 y / yes / n / no，刚才的“%s”已忽略，请重新输入。\n' "$a" ;;
+        esac
+    done
+}
+
+need_tty() {
+    # AGENT_SUDO_GATE_TEST_TTY=1 仅供自动化回归测试（验证取消/无效输入分支），正常使用不要设
+    [ "${AGENT_SUDO_GATE_TEST_TTY:-0}" = "1" ] && return 0
+    [ -t 0 ] || die "需要在交互式终端里运行（stdin 不是终端）——否则没法输入 sudo 口令"
+    { : >/dev/tty; } 2>/dev/null || die "拿不到 /dev/tty，无法在这里提示口令"
+}
+
+# ── 结果文件：让调用方（人或 AI）明确知道成功/失败/被取消 ────────────────────
+#   status=success | failed | cancelled
+write_result() {
+    local id="$1" st="$2" msg="$3" ts
+    ts="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    ssh_q "printf 'id=%s\nstatus=%s\nat=%s\nmessage=%s\n' '$id' '$st' '$ts' '$msg' > $REMOTE_DIR/$id.result" 2>/dev/null || true
+}
+
+list_queue() {
+    ssh_q "mkdir -p $REMOTE_DIR && chmod 700 $REMOTE_DIR; ls -1t $REMOTE_DIR/*.sh 2>/dev/null" | tr -d '\r'
+}
+
+# ── 子命令 ───────────────────────────────────────────────────────────────────
+
+cmd_queue() {
+    require_target
+    local name="${1:-}"
+    [ -n "$name" ] || die "用法: agent-sudo-gate queue <名字> [--] '命令'  或  agent-sudo-gate queue <名字> <<'EOS' … EOS"
+    shift || true
+    [ "${1:-}" = "--" ] && shift
+
+    local body; body="$(mktemp)" || die "mktemp 失败"
+    # shellcheck disable=SC2064
+    trap "rm -f '$body'" EXIT
+
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' "$@" > "$body"
+    else
+        cat > "$body"
+    fi
+    [ -s "$body" ] || die "脚本体是空的——要么跟在名字后面给命令，要么用 stdin 喂进来"
+
+    local slug ts id
+    slug="$(printf '%s' "$name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9._-]\+/-/g; s/^-*//; s/-*$//')"
+    [ -n "$slug" ] || slug="task"
+    ts="$(date +%Y%m%d-%H%M%S)"
+    id="$ts-$slug"
+
+    local script; script="$(mktemp)" || die "mktemp 失败"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf '# 用途：%s\n' "$name"
+        printf '# 由 agent-sudo-gate %s 入队于 %s\n' "$VERSION" "$(date '+%Y-%m-%d %H:%M:%S %z')"
+        printf '# 执行方式：agent-sudo-gate run %s —— 由人确认脚本内容并输入自己的 sudo 口令\n' "$id"
+        printf 'set -uo pipefail\n'
+        printf 'cd "$HOME" 2>/dev/null || true\n'
+        cat "$body"
+    } > "$script"
+
+    # 注意：这里不能用 -n——-n 会把 stdin 换成 /dev/null，脚本体就传不过去了
+    ssh ${SSH_ARGS_ARR[@]+"${SSH_ARGS_ARR[@]}"} "$SSH_TARGET" \
+        "umask 077; mkdir -p $REMOTE_DIR; chmod 700 $REMOTE_DIR; cat > $REMOTE_DIR/$id.sh" \
+        < "$script" || { rm -f "$script"; die "入队失败：检查 SSH 连接与 $REMOTE_DIR 是否可写"; }
+    rm -f "$script"
+
+    printf '%s\n' "$id"
+    info "已入队 $id（未执行）。请人运行：agent-sudo-gate run $id"
+}
+
+cmd_list() {
+    require_target
+    local files; files="$(list_queue)"
+    if [ -z "$files" ]; then
+        info "队列为空——没有等待提权的任务。"
+        return 0
+    fi
+    printf '待执行的 root 脚本：\n\n'
+    local f n=0 id size title
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        n=$((n + 1))
+        id="$(basename "$f" .sh)"
+        size="$(ssh_q "stat -c%s '$f'" 2>/dev/null | tr -d '\r')"
+        title="$(ssh_q "sed -n '2p' '$f' 2>/dev/null | sed 's/^# *//'" | tr -d '\r')"
+        printf '  %d) %s\n     %s  (%s 字节)\n' "$n" "$id" "${title:-（无说明）}" "${size:-?}"
+    done <<< "$files"
+    printf '\n看内容：agent-sudo-gate show <id>\n执行：  agent-sudo-gate run <id>\n'
+}
+
+cmd_show() {
+    require_target
+    local id="${1:-}"
+    [ -n "$id" ] || die "用法: agent-sudo-gate show <id>"
+    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "队列里没有 $id"
+    printf '──────── %s.sh ────────\n' "$id"
+    ssh_q "cat $REMOTE_DIR/$id.sh" | tr -d '\r'
+    printf '──────── 结束 ────────\n'
+}
+
+cmd_result() {
+    require_target
+    local id="${1:-}"
+    [ -n "$id" ] || die "用法: agent-sudo-gate result <id>"
+    ssh_q "cat $REMOTE_DIR/$id.result 2>/dev/null" | tr -d '\r'
+}
+
+cmd_purge() {
+    require_target
+    need_tty
+    local n
+    n="$(ssh_q "ls -1 $REMOTE_DIR/*.sh 2>/dev/null | wc -l" | tr -d '\r')"
+    if [ "${n:-0}" -eq 0 ]; then
+        info "队列本来就是空的，无需清理。"
+        return 0
+    fi
+    if ! confirm "[agent-sudo-gate] 将删除队列里 $n 个脚本及其输出，输 y 确认、n 取消： "; then
+        write_result "_purge" cancelled "用户取消了操作，队列未清空"
+        info "✘ 用户取消了操作，队列未清空。"
+        return 2
+    fi
+    ssh_q "rm -f $REMOTE_DIR/*.sh $REMOTE_DIR/*.log $REMOTE_DIR/*.result"
+    info "已清空队列"
+}
+
+cmd_run() {
+    require_target
+    need_tty
+    local id="${1:-}"
+
+    if [ -z "$id" ]; then
+        local cnt
+        cnt="$(list_queue | grep -c . || true)"
+        if [ "${cnt:-0}" -eq 0 ]; then
+            info "队列为空，没有要执行的脚本。"
+            return 0
+        elif [ "${cnt:-0}" -eq 1 ]; then
+            id="$(list_queue | head -1 | xargs -r basename | sed 's/\.sh$//')"
+        else
+            cmd_list
+            printf '\n'
+            local pick
+            while :; do
+                printf '[agent-sudo-gate] 输入编号（1-%s）执行，输 n 取消： ' "$cnt"
+                if ! IFS= read -r pick; then
+                    printf '\n'
+                    write_result "_picker" cancelled "用户取消了操作，没有选择任何任务"
+                    info "✘ 用户取消了操作：没有选择任何任务。"
+                    return 2
+                fi
+                pick="$(printf '%s' "${pick%%$'\r'}" | tr -d '[:space:]')"
+                case "${pick,,}" in
+                    n|no)
+                        write_result "_picker" cancelled "用户取消了操作，没有选择任何任务"
+                        info "✘ 用户取消了操作：没有选择任何任务。"
+                        return 2 ;;
+                    ""|*[!0-9]*)
+                        printf '  ↑ 请输入 1-%s 之间的编号，或输 n 取消（刚才的输入已忽略）。\n' "$cnt" ;;
+                    *)
+                        if [ "$pick" -lt 1 ] || [ "$pick" -gt "$cnt" ]; then
+                            printf '  ↑ 编号超出范围（只有 1-%s），请重新输入。\n' "$cnt"
+                            continue
+                        fi
+                        id="$(list_queue | sed -n "${pick}p" | xargs -r basename | sed 's/\.sh$//')"
+                        [ -n "$id" ] || { printf '  ↑ 取不到第 %s 条，重来。\n' "$pick"; continue; }
+                        break ;;
+                esac
+            done
+        fi
+    fi
+
+    ssh_q "test -f $REMOTE_DIR/$id.sh" 2>/dev/null || die "队列里没有 $id（agent-sudo-gate list 看现有 id）"
+
+    printf '──────── 下面这个脚本将以 root 执行 ────────\n'
+    ssh_q "cat $REMOTE_DIR/$id.sh" | tr -d '\r'
+    printf '────────────────────────────────────────────\n\n'
+    printf '确认无误就输入 y 继续；不想跑就输入 n。\n'
+
+    if ! confirm "[agent-sudo-gate] 执行请输 y（yes），取消请输 n（no）： "; then
+        printf '\n'
+        write_result "$id" cancelled "用户取消了操作，脚本未执行，仍在队列里"
+        info "✘ 用户取消了操作：$id 未执行，仍留在队列里。"
+        return 2
+    fi
+
+    printf '\n'
+    printf '▶ 马上会出现  [sudo] password for <你>:  —— 直接输口令，屏幕上不会显示字符。\n'
+    printf '▶ 输错可以重试（sudo 给 3 次机会）。\n\n'
+
+    # 清掉任何残留时间戳，确保这次一定要真输口令
+    ssh_q 'sudo -k' 2>/dev/null
+
+    ssh_t "sudo -k; \
+           if sudo bash $REMOTE_DIR/$id.sh 2>&1 | tee $REMOTE_DIR/$id.log; then rc=0; else rc=1; fi; \
+           sudo -k 2>/dev/null; \
+           exit \$rc"
+    local rc=$?
+
+    printf '\n'
+    case "$rc" in
+        0)   write_result "$id" success "执行成功，输出见 $REMOTE_DIR/$id.log"
+             info "✔ 执行成功。输出已存 $REMOTE_DIR/$id.log" ;;
+        255) write_result "$id" failed "SSH 连接失败（exit 255），未执行"
+             info "✘ SSH 连接失败（exit 255）：目标机可能已关机或网络不通" ;;
+        *)   write_result "$id" failed "执行失败（exit $rc），输出见 $REMOTE_DIR/$id.log"
+             info "✘ 执行失败（exit $rc）。常见原因：口令输错、脚本里的命令本身报错。"
+             info "  输出见 $REMOTE_DIR/$id.log" ;;
+    esac
+
+    if [ "$rc" -eq 0 ]; then
+        ssh_q "mkdir -p $REMOTE_DIR/done && mv -f $REMOTE_DIR/$id.sh $REMOTE_DIR/done/ 2>/dev/null; true"
+        info "脚本已归档到 $REMOTE_DIR/done/（要复跑就 mv 回来）"
+    else
+        info "脚本仍在队列里，可修好后重跑。"
+    fi
+    return "$rc"
+}
+
+cmd_status() {
+    printf 'agent-sudo-gate %s\n' "$VERSION"
+    printf '  SSH 目标   : %s\n' "${SSH_TARGET:-（未配置）}"
+    printf '  SSH 参数   : %s\n' "${SSH_ARGS:-（无）}"
+    printf '  远端队列   : %s\n' "$REMOTE_DIR"
+    printf '  配置文件   : %s%s\n' "$CONFIG_FILE" "$([ -f "$CONFIG_FILE" ] && echo '' || echo '（不存在）')"
+    [ -n "$SSH_TARGET" ] || return 0
+    local n
+    n="$(ssh_q "ls -1 $REMOTE_DIR/*.sh 2>/dev/null | wc -l" | tr -d '\r')"
+    printf '  待执行     : %s 条\n' "${n:-?}"
+}
+
+cmd_help() {
+    cat <<'EOF'
+agent-sudo-gate — a password gate for AI agents that need sudo
+
+  让 AI 准备 root 命令、让你亲自批准并输口令。密码不进对话、不进脚本、不进日志。
+
+用法:
+  agent-sudo-gate queue <名字> [--] '命令'    把要 root 执行的事排进队列（不执行）
+  agent-sudo-gate queue <名字> <<'EOS'        ……或从 stdin 读整段脚本
+  ...多行命令...
+  EOS
+
+  agent-sudo-gate list                       列出队列
+  agent-sudo-gate show <id>                  查看某条脚本全文
+  agent-sudo-gate run [id]                   【由人运行】确认后执行，sudo 当场提示口令
+  agent-sudo-gate result <id>                查看执行结果（success/failed/cancelled）
+  agent-sudo-gate purge                     清空队列与历史输出
+  agent-sudo-gate status                    显示配置与队列概况
+  agent-sudo-gate help | version
+
+配置（环境变量优先）:
+  AGENT_SUDO_GATE_SSH_TARGET   ssh 目标，如 user@host 或 ~/.ssh/config 里的别名
+  AGENT_SUDO_GATE_SSH_ARGS     额外 ssh 参数，如 "-F ./ssh_config -p 2222"
+  AGENT_SUDO_GATE_REMOTE_DIR   远端队列目录，默认 ~/.agent-sudo-gate/queue
+
+示例:
+  export AGENT_SUDO_GATE_SSH_TARGET=user@192.168.1.10
+  agent-sudo-gate queue install-deps <<'EOS'
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential
+  EOS
+  agent-sudo-gate run            # 你来看脚本、输 y、输口令
+
+退出码:
+  0 成功   2 用户取消   1 参数/连接/执行失败
+EOF
+}
+
+# ── 入口 ─────────────────────────────────────────────────────────────────────
+case "${1:-}" in
+    queue|enqueue|add)  shift; cmd_queue "$@" ;;
+    list|ls)            cmd_list ;;
+    show|cat)           shift; cmd_show "$@" ;;
+    run|exec)           shift; cmd_run "$@" ;;
+    result|status-of)   shift; cmd_result "$@" ;;
+    purge|clear)        cmd_purge ;;
+    status)             cmd_status ;;
+    version|-V|--version) printf 'agent-sudo-gate %s\n' "$VERSION" ;;
+    ""|-h|--help|help)  cmd_help ;;
+    *)                  die "未知子命令：$1（agent-sudo-gate help 看用法）" ;;
+esac
