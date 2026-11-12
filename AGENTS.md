@@ -70,6 +70,10 @@ status=cancelled  # the human said no  → nothing ran, the script is still queu
 interface language. `message=` is written for the human and may be Chinese, Japanese, German… —
 never parse it, never translate it back into a decision.
 
+The same applies to your own prose: answer in the language the human writes to you, and never
+drift into whatever locale the tool happened to print. Localised output is theirs to read, not a
+cue for you to switch language.
+
 Rules for `cancelled`:
 
 - It means **the human declined**, not that something broke.

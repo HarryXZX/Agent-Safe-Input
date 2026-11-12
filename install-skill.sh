@@ -18,7 +18,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SRC="$ROOT/skills/agent-safe-input"
 NAME="agent-safe-input"
-VERSION="0.1.0"
+VERSION="$(sed -n 's/^  version:[[:space:]]*"\{0,1\}\([0-9][0-9.]*\)"\{0,1\}[[:space:]]*$/\1/p' "$SKILL_SRC/SKILL.md" 2>/dev/null | head -1)"
+[ -n "$VERSION" ] || VERSION="unknown"
 
 die()  { printf 'install-skill: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'install-skill: %s\n' "$*" >&2; }

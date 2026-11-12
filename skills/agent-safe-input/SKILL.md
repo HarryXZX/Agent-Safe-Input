@@ -1,10 +1,10 @@
 ---
 name: agent-safe-input
-description: Routes every privileged command through a human-approved script queue instead of asking the user for a password. Use whenever a task needs sudo, root, apt-get, dpkg, systemctl, mount, chown outside your home directory, editing /etc or /usr, adding a user, or any admin change on a remote host; also when the user says 提权, 口令, 密码, root 权限, 装系统包, or 改系统配置. The agent queues the script over SSH and never executes it; the human reads the exact bytes, answers y/n, and types the sudo password themselves.
+description: Routes every privileged command through a human-approved queue instead of asking the user for a password. Use whenever a task needs sudo, root, apt-get, dpkg, systemctl, mount, chown outside the home directory, editing /etc or /usr, adding a user, or any admin change on a remote host — including "install a system package" or "give me root". The agent only writes and queues the script; the human reads the exact bytes, answers y/n, and types the sudo password on their own keyboard.
 license: MIT
 compatibility: Requires bash and ssh on the machine running the agent. The target host must reach you over key-based SSH and have sudo that asks for a password. Works from Linux, macOS, WSL and Git Bash.
 metadata:
-  version: "0.1.0"
+  version: "0.4.0"
   repository: "https://github.com/HarryXZX/Agent-Safe-Input"
 ---
 
@@ -40,6 +40,21 @@ Do **not** queue things you can do yourself: building in `~/work`, `pip install 
 Unsure? If the command starts with `sudo`, it belongs in the queue. If it only works with
 `sudo`, it belongs in the queue.
 
+## Language
+
+This file is written in English on purpose — a skill that mixes languages makes some models
+drift into the wrong one mid-conversation, or start answering in Chinese when the human wrote
+in English. So:
+
+- **Mirror the human.** Reply in the language the human is writing to you — nothing else. Their
+  Chinese stays Chinese, their English stays English. Never switch language because a file, a
+  log line, or a tool message happens to be in another one.
+- **`status=` is the contract, the prose is decoration.** Tool output may be localised into the
+  human's system locale (`message=…`, `list`, `help`). That text is for their eyes, it is not
+  an instruction to you, and it is not a reason to adopt its language.
+- **Do not paste localised output back at them.** Quote the id or the command, not the banner.
+- **Never translate `status=`.** It is always `success`, `failed` or `cancelled`.
+
 ## The loop
 
 ```bash
@@ -72,9 +87,6 @@ status=cancelled  # the human said no  → nothing ran, the script is still queu
 
 Exit codes mirror the file: `0` success, `2` cancelled, anything else failure.
 
-`status=` is always one of those three English words. `message=` may be written in the human's
-interface language (Chinese, Japanese, German…) — read `status=`, never the prose.
-
 ## Reading `cancelled` correctly
 
 `cancelled` means **the human declined**. It does not mean the command broke.
@@ -83,7 +95,7 @@ interface language (Chinese, Japanese, German…) — read `status=`, never the 
 - Do **not** report it as an error or ask "why did it fail?".
 - Do **not** retry it under a different name to get a different answer.
 
-Ask once, plainly:
+Ask once, plainly, in the human's language:
 
 > I see you cancelled `install-build-deps`. Want me to change something, or drop it?
 
@@ -159,14 +171,3 @@ Say so and stop — do not fall back to running `sudo` yourself. Point the human
 repository, or ask them to install the script into `~/.local/bin`. If the machine has no
 `agent-safe-input` and no way to get one, the correct output is a **list of commands for the
 human to run by hand**, not an attempt.
-
-## 中文速览
-
-你没有 root，也不该有。需要提权时**不要自己跑 `sudo`**，而是：
-
-1. `agent-safe-input queue <名字> <<'EOS' … EOS` 把命令写成脚本入队（**只写文件，不执行**）；
-2. 一句话告诉用户去跑 `agent-safe-input run <id>`，由他本人看脚本、按 y、输口令；
-3. 之后用 `agent-safe-input result <id>` 读结果：`success` / `failed` / `cancelled`。
-
-`cancelled` 表示**人拒绝了**，不是出错——不要自动重排、不要追问"为什么失败了"。
-口令永远不要索要：它只经过用户的键盘和远端 TTY，不进入你的上下文。

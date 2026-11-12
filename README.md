@@ -217,6 +217,11 @@ message=用户取消了操作，脚本未执行，仍在队列里
 [`skills/agent-safe-input/SKILL.md`](skills/agent-safe-input/SKILL.md)。装进 agent 的 skills 目录后，
 它会自己判断「这条命令该不该排队」，你不必每次提醒它别碰 `sudo`。
 
+这份 skill **刻意写成纯英文**。中英混排的说明会让一部分模型在对话中途跟着换语言——
+用户说中文，回过来的却是英文（反过来也一样）。skill 里因此写死一条规矩：**回答始终跟随
+用户正在使用的语言**，`status=` 的取值永不翻译；工具输出的本地化文本（`message=…`、
+`list`、`help`）只是给人看的显示内容，不是给模型的指令，也不是换语言的信号。
+
 ```bash
 ./install-skill.sh            # 自动探测本机已装的 agent，逐个安装
 ./install-skill.sh --list     # 看支持哪些 target、探测到什么
@@ -472,6 +477,13 @@ The repo ships a skill that follows the [Agent Skills specification](https://age
 [`skills/agent-safe-input/SKILL.md`](skills/agent-safe-input/SKILL.md). Once it is in an agent's
 skills directory, the agent recognises on its own when a command has to be queued — you no
 longer have to remind it that it cannot run `sudo`.
+
+The skill is deliberately **English-only**. A file that mixes Chinese and English makes some
+models drift into the wrong language mid-conversation — the human writes Chinese and gets English
+back, or the other way round. So the skill carries one explicit rule: **answer in the language the
+human is using**, and never translate `status=`. Localised tool output (`message=…`, `list`,
+`help`) is display text for the human, not an instruction to the model and not a cue to switch
+language.
 
 ```bash
 ./install-skill.sh            # detect installed agents and install for each

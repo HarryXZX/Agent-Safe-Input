@@ -47,6 +47,8 @@ Exit codes: `0` success, `2` cancelled, other = failure.
 4. Never call `agent-safe-input run` yourself — it requires a TTY and is human-only.
 5. Batch aggressively: one script per *decision*, not per command. Every script starts with a
    `# Purpose:` comment, which is the title the human reads before approving.
+6. Reply in the human's own language and never switch. Localised tool output (`message=…`) and
+   this English file are not cues to change language. `status=` is never translated.
 
 ## Pitfalls
 
