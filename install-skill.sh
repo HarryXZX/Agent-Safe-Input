@@ -7,6 +7,7 @@
 #   ./install-skill.sh                 自动探测本机已存在的 agent，逐个安装（用户级）
 #   ./install-skill.sh claude          只装 Claude Code
 #   ./install-skill.sh claude workbuddy
+#   ./install-skill.sh openclaw        只装 OpenClaw（社区昵称「龙虾」），落 ~/.openclaw/skills/
 #   ./install-skill.sh -p . cursor     装到当前项目的 .cursor/rules/
 #   ./install-skill.sh --list          看支持哪些 target、探测到什么
 #   ./install-skill.sh -f workbuddy    覆盖已有安装
@@ -28,7 +29,7 @@ info() { printf 'install-skill: %s\n' "$*" >&2; }
 [ -f "$SKILL_SRC/SKILL.md" ] || die "找不到 $SKILL_SRC/SKILL.md（请在仓库根目录运行本脚本）"
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # ── 各 agent 的落点 ──────────────────────────────────────────────────────────
@@ -49,11 +50,14 @@ norm_path() {
 # 用户级目录（$HOME 下）；项目级 = <project>/<相对路径>
 user_claude()    { norm_path "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/$NAME"; }
 user_workbuddy() { norm_path "${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}/skills/$NAME"; }
+# OpenClaw（「龙虾」）遵循 AgentSkills 规范，全局安装落在 <state-dir>/skills
+user_openclaw()  { norm_path "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/skills/$NAME"; }
 
 probe_target() {
     case "$1" in
         claude)    [ -d "$(norm_path "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")" ] && echo "已安装客户端" || echo "未检测到" ;;
         workbuddy) [ -d "$(norm_path "${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}")" ] && echo "已安装客户端" || echo "未检测到" ;;
+        openclaw)  [ -d "$(norm_path "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}")" ] && echo "已安装客户端" || echo "未检测到" ;;
         cursor)    [ -d ".cursor" ] && echo "当前目录有 .cursor/" || echo "未检测到（项目级安装即可）" ;;
         agents)    [ -f "AGENTS.md" ] && echo "当前目录有 AGENTS.md" || echo "读仓库根的 AGENTS.md" ;;
         *)         echo "未知" ;;
@@ -65,11 +69,12 @@ list_targets() {
     printf '%s\n' "---------------------------------------------------------------"
     printf '%-12s %-10s %s\n' "claude"    "用户/项目" "~/.claude/skills/$NAME/SKILL.md"
     printf '%-12s %-10s %s\n' "workbuddy" "用户/项目" "~/.workbuddy/skills/$NAME/SKILL.md"
+    printf '%-12s %-10s %s\n' "openclaw"  "用户"      "~/.openclaw/skills/$NAME/SKILL.md"
     printf '%-12s %-10s %s\n' "cursor"    "项目"      ".cursor/rules/$NAME.mdc"
     printf '%-12s %-10s %s\n' "agents"    "—"         "无需安装，codex/gemini/copilot 直接读 AGENTS.md"
     printf '\n探测结果：\n'
     local t
-    for t in claude workbuddy cursor agents; do
+    for t in claude workbuddy openclaw cursor agents; do
         printf '  %-10s %s\n' "$t" "$(probe_target "$t")"
     done
     printf '\n'
@@ -126,6 +131,7 @@ do_uninstall() {
     case "$t" in
         claude)    dest="$(user_claude)" ;;
         workbuddy) dest="$(user_workbuddy)" ;;
+        openclaw)  dest="$(user_openclaw)" ;;
         cursor)    dest="$PROJECT_DIR/.cursor/rules/$NAME.mdc" ;;
         agents)    info "agents 目标无需安装，也不卸载"; return 0 ;;
         *)         die "未知 target：$t" ;;
@@ -178,6 +184,7 @@ PROJECT_DIR="$(norm_path "$PROJECT_DIR")"
 if [ ${#TARGETS[@]} -eq 0 ]; then
     [ -d "$(norm_path "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")" ] && TARGETS+=("claude")
     [ -d "$(norm_path "${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}")" ] && TARGETS+=("workbuddy")
+    [ -d "$(norm_path "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}")" ] && TARGETS+=("openclaw")
     if [ ${#TARGETS[@]} -eq 0 ]; then
         warn "没有探测到已知的 agent 客户端目录"
         list_targets
@@ -207,6 +214,12 @@ for t in "${TARGETS[@]}"; do
                 info "cursor 只支持项目级，自动改用 -p $PROJECT_DIR"
             fi
             do_install_cursor "$PROJECT_DIR" || rc=$?
+            ;;
+        openclaw)
+            if [ "$MODE" = "project" ]; then
+                info "openclaw 只支持用户级（~/.openclaw/skills），忽略 -p"
+            fi
+            do_install_dir "$(user_openclaw)" || rc=$?
             ;;
         agents)
             info "agents：codex / gemini-cli / copilot 读仓库根的 AGENTS.md，无需安装"

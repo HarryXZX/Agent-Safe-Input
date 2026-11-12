@@ -231,11 +231,17 @@ message=用户取消了操作，脚本未执行，仍在队列里
 |---|---|---|
 | `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code，加 `-p` 装到项目级 |
 | `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy，加 `-p` 装到项目级 |
+| `openclaw` | `~/.openclaw/skills/agent-safe-input/SKILL.md` | OpenClaw（「龙虾」），仅用户级；`openclaw skills info agent-safe-input` 可验证 |
 | `cursor` | `<项目>/.cursor/rules/agent-safe-input.mdc` | Cursor 规则格式，仅项目级 |
 | `agents` | 无需安装 | Codex / Gemini CLI / Copilot 直接读仓库根 `AGENTS.md` |
 
 重复运行是幂等的（内容相同提示「已是最新」）；`-f` 覆盖旧版；`--uninstall <target>` 卸载，
 只删自己放的 `SKILL.md`，目录里的其它文件不动。
+
+其它客户端：只要它遵循 [AgentSkills 规范](https://agentskills.io)、按目录加载 `SKILL.md`，
+把 `skills/agent-safe-input/` 整个目录放进它的 skills 目录即可，不需要改本仓库。
+**DeepSeek Harness（dsh）例外**——它没有通用的 `skills/` 目录约定，技能以 dsh-market 插件
+形式安装（`dsh-agent-skills` 之类），当前 desktop profile 不装这类插件时不会加载任何 `SKILL.md`。
 
 ## Windows 启动器
 
@@ -494,12 +500,19 @@ language.
 |---|---|---|
 | `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code; add `-p` for project scope |
 | `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy; add `-p` for project scope |
+| `openclaw` | `~/.openclaw/skills/agent-safe-input/SKILL.md` | OpenClaw; user scope only, verify with `openclaw skills info agent-safe-input` |
 | `cursor` | `<project>/.cursor/rules/agent-safe-input.mdc` | Cursor rule format, project scope only |
 | `agents` | nothing to install | Codex / Gemini CLI / Copilot read the repo's `AGENTS.md` |
 
 Re-running is idempotent (identical content reports "already up to date"); `-f` overwrites an older
 copy; `--uninstall <target>` removes only the `SKILL.md` this tool placed, leaving anything else in
 the directory untouched.
+
+Other clients: if it follows the [AgentSkills specification](https://agentskills.io) and loads
+`SKILL.md` from a directory, drop `skills/agent-safe-input/` into that directory — no changes to
+this repo needed. **DeepSeek Harness (dsh) is the exception** — it has no general `skills/`
+directory convention; its skills are installed as dsh-market plugins (`dsh-agent-skills` and
+friends), and a desktop profile without one of those plugins loads no `SKILL.md` at all.
 
 ## Windows launcher
 
