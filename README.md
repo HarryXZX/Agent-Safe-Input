@@ -232,6 +232,7 @@ message=用户取消了操作，脚本未执行，仍在队列里
 | `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code，加 `-p` 装到项目级 |
 | `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy，加 `-p` 装到项目级 |
 | `openclaw` | `~/.openclaw/skills/agent-safe-input/SKILL.md` | OpenClaw（「龙虾」），仅用户级；`openclaw skills info agent-safe-input` 可验证 |
+| `hermes` | `~/.hermes/skills/agent-safe-input/SKILL.md` | Hermes Agent（「爱马仕」），仅用户级；profile 激活时落 `$HERMES_HOME/skills/` |
 | `cursor` | `<项目>/.cursor/rules/agent-safe-input.mdc` | Cursor 规则格式，仅项目级 |
 | `agents` | 无需安装 | Codex / Gemini CLI / Copilot 直接读仓库根 `AGENTS.md` |
 
@@ -242,6 +243,19 @@ message=用户取消了操作，脚本未执行，仍在队列里
 把 `skills/agent-safe-input/` 整个目录放进它的 skills 目录即可，不需要改本仓库。
 **DeepSeek Harness（dsh）例外**——它没有通用的 `skills/` 目录约定，技能以 dsh-market 插件
 形式安装（`dsh-agent-skills` 之类），当前 desktop profile 不装这类插件时不会加载任何 `SKILL.md`。
+
+Hermes Agent（「爱马仕」）除了上面的复制安装，还支持"挂载"现成目录，不必搬文件：
+
+```yaml
+# ~/.hermes/config.yaml
+skills:
+  external_dirs:
+    - ~/path/to/Agent-Safe-Input/skills
+```
+
+**但不要把它直接指向 git 仓库。** Hermes 会"自改进"技能——它认为指令有歧义时会直接 patch
+`SKILL.md`、并追加写入 `SKILL_HISTORY.md`；`external_dirs` 不是写保护边界，仓库会被改脏。
+要挂载就挂一份**只读副本**，或者干脆用 `./install-skill.sh hermes` 复制到 `~/.hermes/skills/`。
 
 ## Windows 启动器
 
@@ -501,6 +515,7 @@ language.
 | `claude` | `~/.claude/skills/agent-safe-input/SKILL.md` | Claude Code; add `-p` for project scope |
 | `workbuddy` | `~/.workbuddy/skills/agent-safe-input/SKILL.md` | WorkBuddy; add `-p` for project scope |
 | `openclaw` | `~/.openclaw/skills/agent-safe-input/SKILL.md` | OpenClaw; user scope only, verify with `openclaw skills info agent-safe-input` |
+| `hermes` | `~/.hermes/skills/agent-safe-input/SKILL.md` | Hermes Agent; user scope only, lands under `$HERMES_HOME/skills/` when a profile is active |
 | `cursor` | `<project>/.cursor/rules/agent-safe-input.mdc` | Cursor rule format, project scope only |
 | `agents` | nothing to install | Codex / Gemini CLI / Copilot read the repo's `AGENTS.md` |
 
@@ -513,6 +528,20 @@ Other clients: if it follows the [AgentSkills specification](https://agentskills
 this repo needed. **DeepSeek Harness (dsh) is the exception** — it has no general `skills/`
 directory convention; its skills are installed as dsh-market plugins (`dsh-agent-skills` and
 friends), and a desktop profile without one of those plugins loads no `SKILL.md` at all.
+
+Hermes Agent also accepts a mounted directory, so you do not have to copy anything:
+
+```yaml
+# ~/.hermes/config.yaml
+skills:
+  external_dirs:
+    - ~/path/to/Agent-Safe-Input/skills
+```
+
+**Do not point it at the git checkout.** Hermes self-improves skills: when it finds instructions
+ambiguous it patches `SKILL.md` in place and appends to `SKILL_HISTORY.md`, and `external_dirs` is
+not a write barrier — your working tree would end up modified. Mount a read-only copy, or just use
+`./install-skill.sh hermes` and copy into `~/.hermes/skills/`.
 
 ## Windows launcher
 
